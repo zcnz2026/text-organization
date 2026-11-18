@@ -1,0 +1,198 @@
+:root {
+  --bg-canvas-light: #f5f7f9;
+  --bg-canvas-dark: #0f1419;
+  --bg-surface-light: #ffffff;
+  --bg-surface-dark: #161e27;
+  --bg-subtle-light: #eaf0f4;
+  --bg-subtle-dark: #1f2a36;
+
+  --text-primary-light: #101822;
+  --text-primary-dark: #edf2f7;
+  --text-secondary-light: #415060;
+  --text-secondary-dark: #a6b7c9;
+  --text-muted-light: #566677;
+  --text-muted-dark: #9cb0c5;
+
+  --border-subtle-light: #d5dfe7;
+  --border-subtle-dark: #2a3746;
+  --border-strong-light: #b6c5d3;
+  --border-strong-dark: #3b4d61;
+
+  --accent-light: #0e5a6d;
+  --accent-dark: #4cc3d9;
+  --accent-hover-light: #0a4655;
+  --accent-hover-dark: #72d3e5;
+  --accent-contrast-light: #ffffff;
+  --accent-contrast-dark: #071e26;
+  --accent-tint-light: #e3f1f5;
+  --accent-tint-dark: #13313b;
+
+  --status-ok-bg-light: #e8f7ef;
+  --status-ok-bg-dark: #122d22;
+  --status-ok-fg-light: #0b633c;
+  --status-ok-fg-dark: #6ee7b7;
+
+  --status-warn-bg-light: #fef5e3;
+  --status-warn-bg-dark: #312510;
+  --status-warn-fg-light: #8f4f05;
+  --status-warn-fg-dark: #fcd34d;
+
+  --status-err-bg-light: #fdecec;
+  --status-err-bg-dark: #36171a;
+  --status-err-fg-light: #a61e24;
+  --status-err-fg-dark: #fca5a5;
+
+  --scroll-track-light: #e9eff3;
+  --scroll-track-dark: #141b22;
+  --scroll-thumb-light: #6d7f91;
+  --scroll-thumb-dark: #687c91;
+
+  --bg-canvas: var(--bg-canvas-light);
+  --bg-surface: var(--bg-surface-light);
+  --bg-subtle: var(--bg-subtle-light);
+  --text-primary: var(--text-primary-light);
+  --text-secondary: var(--text-secondary-light);
+  --text-muted: var(--text-muted-light);
+  --border-subtle: var(--border-subtle-light);
+  --border-strong: var(--border-strong-light);
+  --accent: var(--accent-light);
+  --accent-hover: var(--accent-hover-light);
+  --accent-contrast: var(--accent-contrast-light);
+  --accent-tint: var(--accent-tint-light);
+  --status-ok-bg: var(--status-ok-bg-light);
+  --status-ok-fg: var(--status-ok-fg-light);
+  --status-warn-bg: var(--status-warn-bg-light);
+  --status-warn-fg: var(--status-warn-fg-light);
+  --status-err-bg: var(--status-err-bg-light);
+  --status-err-fg: var(--status-err-fg-light);
+  --scroll-track: var(--scroll-track-light);
+  --scroll-thumb: var(--scroll-thumb-light);
+
+  @media (prefers-color-scheme: dark) {
+    --bg-canvas: var(--bg-canvas-dark);
+    --bg-surface: var(--bg-surface-dark);
+    --bg-subtle: var(--bg-subtle-dark);
+    --text-primary: var(--text-primary-dark);
+    --text-secondary: var(--text-secondary-dark);
+    --text-muted: var(--text-muted-dark);
+    --border-subtle: var(--border-subtle-dark);
+    --border-strong: var(--border-strong-dark);
+    --accent: var(--accent-dark);
+    --accent-hover: var(--accent-hover-dark);
+    --accent-contrast: var(--accent-contrast-dark);
+    --accent-tint: var(--accent-tint-dark);
+    --status-ok-bg: var(--status-ok-bg-dark);
+    --status-ok-fg: var(--status-ok-fg-dark);
+    --status-warn-bg: var(--status-warn-bg-dark);
+    --status-warn-fg: var(--status-warn-fg-dark);
+    --status-err-bg: var(--status-err-bg-dark);
+    --status-err-fg: var(--status-err-fg-dark);
+    --scroll-track: var(--scroll-track-dark);
+    --scroll-thumb: var(--scroll-thumb-dark);
+  }
+
+  @supports (color: light-dark(white, black)) {
+    --bg-canvas: light-dark(var(--bg-canvas-light), var(--bg-canvas-dark));
+    --bg-surface: light-dark(var(--bg-surface-light), var(--bg-surface-dark));
+    --bg-subtle: light-dark(var(--bg-subtle-light), var(--bg-subtle-dark));
+    --text-primary: light-dark(var(--text-primary-light), var(--text-primary-dark));
+    --text-secondary: light-dark(var(--text-secondary-light), var(--text-secondary-dark));
+    --text-muted: light-dark(var(--text-muted-light), var(--text-muted-dark));
+    --border-subtle: light-dark(var(--border-subtle-light), var(--border-subtle-dark));
+    --border-strong: light-dark(var(--border-strong-light), var(--border-strong-dark));
+    --accent: light-dark(var(--accent-light), var(--accent-dark));
+    --accent-hover: light-dark(var(--accent-hover-light), var(--accent-hover-dark));
+    --accent-contrast: light-dark(var(--accent-contrast-light), var(--accent-contrast-dark));
+    --accent-tint: light-dark(var(--accent-tint-light), var(--accent-tint-dark));
+    --status-ok-bg: light-dark(var(--status-ok-bg-light), var(--status-ok-bg-dark));
+    --status-ok-fg: light-dark(var(--status-ok-fg-light), var(--status-ok-fg-dark));
+    --status-warn-bg: light-dark(var(--status-warn-bg-light), var(--status-warn-bg-dark));
+    --status-warn-fg: light-dark(var(--status-warn-fg-light), var(--status-warn-fg-dark));
+    --status-err-bg: light-dark(var(--status-err-bg-light), var(--status-err-bg-dark));
+    --status-err-fg: light-dark(var(--status-err-fg-light), var(--status-err-fg-dark));
+    --scroll-track: light-dark(var(--scroll-track-light), var(--scroll-track-dark));
+    --scroll-thumb: light-dark(var(--scroll-thumb-light), var(--scroll-thumb-dark));
+  }
+
+  --font-sans: "Geist Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --text-xs: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-lg: 1rem;
+  --text-title: 1.1875rem;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-expo-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  color-scheme: light dark;
+  accent-color: var(--accent);
+  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-block-size: 100dvh;
+  background-color: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  caret-color: var(--accent);
+}
+
+::selection {
+  background-color: var(--accent-tint);
+  color: var(--text-primary);
+}
+
+::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@supports not (scrollbar-color: auto) {
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scroll-thumb);
+    border-radius: 5px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--scroll-track);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
