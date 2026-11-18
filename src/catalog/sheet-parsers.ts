@@ -1,14 +1,35 @@
 import type {
   ArticleCatalogEntry,
-  ArticleParagraph,
   BibleEntry,
   CitationPair,
-  HymnEntry,
   IdiomEntry,
   RichSheetGrid,
-  RosterEntry,
 } from "./catalog-types";
-import { normalizeLangKey, resolvePunctuationRule } from "./lang-presets";
+import {
+  findLangColumn,
+  parseHymnCitationsSheet,
+  parseHymnSheet,
+  parseLordsPrayerSheet,
+  parseRosterSheet,
+  parseWordCitationsSheet,
+  type ParsedLordsPrayerResult,
+} from "./citation-parsers";
+import {
+  colLetterToIndex,
+  DEFAULT_LANG_SHEET_COLS,
+  DEFAULT_SHARED_SHEETS_CONFIG,
+  type PerLanguageSheetColumnConfig,
+  type SharedSheetsConfig,
+} from "../types/schema-config";
+
+export {
+  parseHymnCitationsSheet,
+  parseHymnSheet,
+  parseLordsPrayerSheet,
+  parseRosterSheet,
+  parseWordCitationsSheet,
+  type ParsedLordsPrayerResult,
+};
 
 const txt = (grid: RichSheetGrid, r: number, c: number) =>
   grid[r]?.[c]?.text?.trim() ?? "";
@@ -20,38 +41,43 @@ const urlOf = (grid: RichSheetGrid, r: number, c: number) => {
   return cell.text?.trim().startsWith("http") ? cell.text.trim() : "";
 };
 
-function findLangColumn(row: { text: string }[], langName: string): number {
-  const rule = resolvePunctuationRule(langName);
-  const candidates = new Set(
-    [langName, rule.langName, ...rule.aliases].map(normalizeLangKey),
-  );
-  for (let c = 0; c < row.length; c += 1) {
-    const cellKey = normalizeLangKey(row[c]?.text ?? "");
-    if (!cellKey) continue;
-    for (const cand of candidates) {
-      if (cand && (cellKey === cand || cellKey.includes(cand))) return c;
-    }
-  }
-  return -1;
-}
-
-export function parseArticleCatalogSheet(grid: RichSheetGrid): ArticleCatalogEntry[] {
+export function parseArticleCatalogSheet(
+  grid: RichSheetGrid,
+  cfg?: Partial<PerLanguageSheetColumnConfig>,
+): ArticleCatalogEntry[] {
   const entries: ArticleCatalogEntry[] = [];
   if (grid.length < 2) return entries;
 
-  let colLink = 6;
-  const hdr = grid[0] || [];
-  const foundLink = hdr.findIndex((c) => /链接|link/i.test(c.text));
-  if (foundLink >= 0) colLink = foundLink;
+  const m = { ...DEFAULT_LANG_SHEET_COLS, ...cfg };
+  const colBracket = colLetterToIndex(m.catalogZhBracketCol, 1);
+  const colLine = colLetterToIndex(m.catalogZhLineCol, 2);
+  const colZh = colLetterToIndex(m.catalogZhTitleCol, 3);
+  const colEn = colLetterToIndex(m.catalogEnTitleCol, 4);
+  const colTarget = colLetterToIndex(m.catalogTargetTitleCol, 5);
+  let colLink = colLetterToIndex(m.catalogDocLinkCol, 6);
+  let colTargetCite = colLetterToIndex(m.catalogTargetCiteCol, 7);
+  let colTargetBracketCite = colLetterToIndex(m.catalogTargetBracketCiteCol || "I", 8);
 
-  for (let r = 1; r < grid.length; r += 1) {
-    const zhTitle = txt(grid, r, 3);
-    const enTitle = txt(grid, r, 4);
-    const targetTitle = txt(grid, r, 5);
+  const headerIdx = Math.max(0, (m.catalogHeaderRow || 1) - 1);
+  if (!cfg) {
+    const hdr = grid[headerIdx] || [];
+    const foundLink = hdr.findIndex((c) => /链接|link/i.test(c.text));
+    if (foundLink >= 0) {
+      colLink = foundLink;
+      colTargetCite = foundLink + 1;
+      colTargetBracketCite = foundLink + 2;
+    }
+  }
+
+  for (let r = headerIdx + 1; r < grid.length; r += 1) {
+    const zhTitle = txt(grid, r, colZh);
+    const enTitle = txt(grid, r, colEn);
+    const targetTitle = txt(grid, r, colTarget);
     const docUrl = urlOf(grid, r, colLink);
-    const zhBracketCite = txt(grid, r, 1);
-    const zhSubtitleCite = txt(grid, r, 2);
-    const targetCite = txt(grid, r, colLink + 1);
+    const zhBracketCite = txt(grid, r, colBracket);
+    const zhSubtitleCite = txt(grid, r, colLine);
+    const targetCite = txt(grid, r, colTargetCite);
+    const targetBracketCite = txt(grid, r, colTargetBracketCite);
     if (!zhTitle && !enTitle && !targetTitle) continue;
     entries.push({
       zhTitle,
@@ -61,34 +87,55 @@ export function parseArticleCatalogSheet(grid: RichSheetGrid): ArticleCatalogEnt
       zhSubtitleCite,
       zhBracketCite,
       targetCite,
+      ...(targetBracketCite ? { targetBracketCite } : {}),
     });
   }
   return entries;
 }
 
-export function parseBibleLibrarySheet(grid: RichSheetGrid): BibleEntry[] {
+export function parseBibleLibrarySheet(
+  grid: RichSheetGrid,
+  cfg?: Partial<PerLanguageSheetColumnConfig>,
+): BibleEntry[] {
   const entries: BibleEntry[] = [];
-  let startRow = 1;
-  let colRef = 1;
-  let colZh = 2;
-  let colEn = 3;
-  let colTarget = 4;
+  if (grid.length === 0) return entries;
 
-  for (let r = 0; r < Math.min(grid.length, 5); r += 1) {
-    const rowStr = (grid[r] || []).map((c) => c.text.toLowerCase()).join("|");
-    if (rowStr.includes("chinese") || rowStr.includes("english") || rowStr.includes("章节")) {
-      startRow = r + 1;
-      const row = grid[r];
-      const fRef = row.findIndex((c) => /章节|chapter|verse/i.test(c.text));
-      const fZh = row.findIndex((c) => /chinese|中文/i.test(c.text));
-      const fEn = row.findIndex((c) => /english|英文/i.test(c.text));
-      if (fRef >= 0) colRef = fRef;
-      if (fZh >= 0) colZh = fZh;
-      if (fEn >= 0) {
-        colEn = fEn;
-        colTarget = fEn + 1;
+  const m = { ...DEFAULT_LANG_SHEET_COLS, ...cfg };
+  let startRow = Math.max(1, m.bibleHeaderRow || 2);
+  let colRef = colLetterToIndex(m.bibleChapterCol, 1);
+  let colZh = colLetterToIndex(m.bibleZhCol, 2);
+  let colEn = colLetterToIndex(m.bibleEnCol, 3);
+  let colTarget = colLetterToIndex(m.bibleTargetCol, 4);
+
+  if (!cfg) {
+    startRow = 1;
+    for (let r = 0; r < Math.min(grid.length, 5); r += 1) {
+      const rowStr = (grid[r] || []).map((c) => c.text.toLowerCase()).join("|");
+      if (rowStr.includes("chinese") || rowStr.includes("english") || rowStr.includes("章节")) {
+        startRow = r + 1;
+        const row = grid[r];
+        const fRef = row.findIndex((c) => /章节|chapter|verse/i.test(c.text));
+        const fZh = row.findIndex((c) => /chinese|中文/i.test(c.text));
+        const fEn = row.findIndex((c) => /english|英文/i.test(c.text));
+        if (fRef >= 0) colRef = fRef;
+        if (fZh >= 0) colZh = fZh;
+        if (fEn >= 0) {
+          colEn = fEn;
+          colTarget = fEn + 1;
+        }
+        break;
       }
-      break;
+    }
+  } else {
+    const hdrStr = (grid[startRow - 1] || []).map((c) => c.text.toLowerCase()).join("|");
+    if (!hdrStr.includes("chinese") && !hdrStr.includes("章节") && grid.length > 1) {
+      for (let r = 0; r < Math.min(grid.length, 4); r += 1) {
+        const s = (grid[r] || []).map((c) => c.text.toLowerCase()).join("|");
+        if (s.includes("chinese") || s.includes("english") || s.includes("章节")) {
+          startRow = r + 1;
+          break;
+        }
+      }
     }
   }
 
@@ -103,29 +150,38 @@ export function parseBibleLibrarySheet(grid: RichSheetGrid): BibleEntry[] {
   return entries;
 }
 
-export function parseIdiomGlossarySheet(grid: RichSheetGrid): IdiomEntry[] {
+export function parseIdiomGlossarySheet(
+  grid: RichSheetGrid,
+  cfg?: Partial<PerLanguageSheetColumnConfig>,
+): IdiomEntry[] {
   const entries: IdiomEntry[] = [];
   if (grid.length < 2) return entries;
 
-  let colZh = 5;
-  let colEnA = 6;
-  let colEnB = 8;
-  let colTarget = 9;
+  const m = { ...DEFAULT_LANG_SHEET_COLS, ...cfg };
+  let startRow = Math.max(1, m.idiomHeaderRow || 1);
+  let colZh = colLetterToIndex(m.idiomZhCol, 5);
+  let colEnA = colLetterToIndex(m.idiomEn1Col, 6);
+  let colEnB = colLetterToIndex(m.idiomEn2Col, 8);
+  let colTarget = colLetterToIndex(m.idiomTargetCol, 9);
 
-  for (let r = 0; r < Math.min(grid.length, 4); r += 1) {
-    const row = grid[r] || [];
-    const fZh = row.findIndex((c) => c.text.includes("中文"));
-    if (fZh >= 0) {
-      colZh = fZh;
-      colEnA = fZh + 1;
-      const fTarget = row.findIndex(
-        (c, idx) => idx > fZh + 1 && !/英文|一致|来源|日期|状态/.test(c.text) && c.text.trim().length > 0,
-      );
-      if (fTarget >= 0) {
-        colTarget = fTarget;
-        colEnB = fTarget - 1;
+  if (!cfg) {
+    for (let r = 0; r < Math.min(grid.length, 4); r += 1) {
+      const row = grid[r] || [];
+      const fZh = row.findIndex((c) => c.text.includes("中文"));
+      if (fZh >= 0) {
+        startRow = r + 1;
+        colZh = fZh;
+        colEnA = fZh + 1;
+        const fTarget = row.findIndex(
+          (c, idx) =>
+            idx > fZh + 1 && !/英文|一致|来源|日期|状态/.test(c.text) && c.text.trim().length > 0,
+        );
+        if (fTarget >= 0) {
+          colTarget = fTarget;
+          colEnB = fTarget - 1;
+        }
+        break;
       }
-      break;
     }
   }
 
@@ -135,7 +191,7 @@ export function parseIdiomGlossarySheet(grid: RichSheetGrid): IdiomEntry[] {
       .map((x) => x.trim())
       .filter(Boolean);
 
-  for (let r = 1; r < grid.length; r += 1) {
+  for (let r = startRow; r < grid.length; r += 1) {
     const zh = txt(grid, r, colZh);
     const en1 = txt(grid, r, colEnA);
     const en2 = txt(grid, r, colEnB);
@@ -153,6 +209,7 @@ export function parseIdiomGlossarySheet(grid: RichSheetGrid): IdiomEntry[] {
 export function parseCommonTermsSheet(
   grid: RichSheetGrid,
   langName: string,
+  cfg?: Partial<SharedSheetsConfig>,
 ): {
   godSaysText: string;
   citations: CitationPair[];
@@ -163,7 +220,8 @@ export function parseCommonTermsSheet(
   const fixedTerms = new Map<string, string>();
   if (grid.length === 0) return { godSaysText, citations, fixedTerms };
 
-  let headerIdx = 0;
+  const m = { ...DEFAULT_SHARED_SHEETS_CONFIG, ...cfg };
+  let headerIdx = Math.max(0, (m.commonTermsHeaderRow || 1) - 1);
   let langCol = -1;
   for (let r = 0; r < Math.min(grid.length, 5); r += 1) {
     const c = findLangColumn(grid[r] || [], langName);
@@ -175,13 +233,15 @@ export function parseCommonTermsSheet(
   }
   if (langCol < 0) langCol = 3;
 
-  let colZh = 0;
-  let colEn = 1;
-  const hdr = grid[headerIdx] || [];
-  const fZh = hdr.findIndex((c) => /中文|chinese/i.test(c.text));
-  const fEn = hdr.findIndex((c) => /英文|english/i.test(c.text));
-  if (fZh >= 0) colZh = fZh;
-  if (fEn >= 0) colEn = fEn;
+  let colZh = colLetterToIndex(m.commonTermsZhCol, 0);
+  let colEn = colLetterToIndex(m.commonTermsEnCol, 1);
+  if (!cfg) {
+    const hdr = grid[headerIdx] || [];
+    const fZh = hdr.findIndex((c) => /中文|chinese/i.test(c.text));
+    const fEn = hdr.findIndex((c) => /英文|english/i.test(c.text));
+    if (fZh >= 0) colZh = fZh;
+    if (fEn >= 0) colEn = fEn;
+  }
 
   for (let r = headerIdx + 1; r < grid.length; r += 1) {
     const zh = txt(grid, r, colZh);
@@ -218,94 +278,4 @@ export function parseCommonTermsSheet(
   }
 
   return { godSaysText, citations, fixedTerms };
-}
-
-export function parseRosterSheet(
-  grid: RichSheetGrid,
-  langName: string,
-): RosterEntry[] {
-  const entries: RosterEntry[] = [];
-  if (grid.length < 3) return entries;
-
-  let headerIdx = 1;
-  let langCol = -1;
-  for (let r = 0; r < Math.min(grid.length, 5); r += 1) {
-    const c = findLangColumn(grid[r] || [], langName);
-    if (c >= 0) {
-      headerIdx = r;
-      langCol = c;
-      break;
-    }
-  }
-  if (langCol < 0) return entries;
-
-  for (let r = headerIdx + 1; r < grid.length; r += 1) {
-    const chinese = txt(grid, r, 2);
-    const english = txt(grid, r, 3);
-    const episode = txt(grid, r, 5);
-    const targetText = txt(grid, r, langCol);
-    if (!targetText || (!chinese && !english)) continue;
-    entries.push({ chinese, english, episode, targetText });
-  }
-  return entries;
-}
-
-export function parseLordsPrayerSheet(
-  grid: RichSheetGrid,
-  langName: string,
-): ArticleParagraph[] {
-  const result: ArticleParagraph[] = [];
-  if (grid.length === 0) return result;
-
-  let headerIdx = 0;
-  let langCol = -1;
-  for (let r = 0; r < Math.min(grid.length, 5); r += 1) {
-    const c = findLangColumn(grid[r] || [], langName);
-    if (c >= 0) {
-      headerIdx = r;
-      langCol = c;
-      break;
-    }
-  }
-  if (langCol < 0) return result;
-
-  for (let r = headerIdx + 1; r < grid.length; r += 1) {
-    const chinese = txt(grid, r, 0);
-    const english = txt(grid, r, 1);
-    const target = txt(grid, r, langCol);
-    if (target) result.push({ chinese, english, target });
-  }
-  return result;
-}
-
-export function parseHymnSheet(grid: RichSheetGrid): HymnEntry[] {
-  const hymns: HymnEntry[] = [];
-  let current: HymnEntry | null = null;
-
-  for (let r = 0; r < grid.length; r += 1) {
-    const c0 = txt(grid, r, 0);
-    const c1 = txt(grid, r, 1);
-    const c2 = txt(grid, r, 2);
-    if (!c0 && !c1 && !c2) continue;
-
-    if (/^《.+》$/.test(c0) || (c0 && c1 && c2 && c0.length < 40 && !/[，。,.!?]/.test(c0))) {
-      current = {
-        zhTitle: c0.replace(/^[《“"]+|[》”"]+$/g, ""),
-        enTitle: c1.replace(/^["“]+|["”]+$/g, ""),
-        targetTitle: c2.replace(/^[«„“""]+|[»”“""]+$/g, ""),
-        lines: [],
-      };
-      hymns.push(current);
-      continue;
-    }
-
-    if (current && c2) {
-      if (c0.includes("跟随羔羊唱新歌") || c1.toLowerCase().startsWith("from follow")) {
-        current.targetCitation = c2;
-      } else {
-        current.lines.push({ chinese: c0, english: c1, target: c2 });
-      }
-    }
-  }
-  return hymns;
 }

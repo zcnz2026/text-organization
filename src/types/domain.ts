@@ -23,6 +23,7 @@ export interface PunctuationRule {
   periodMode: PeriodPlacementMode;
   bibleCitationMode: BibleCitationMode;
   singleCitationRowOnly: boolean;
+  sentencePeriodChar?: string;
   notes?: string;
 }
 
@@ -37,6 +38,7 @@ export interface LanguageResourceLinks {
   hymnSheetUrl: string;
   lordsPrayerUrl: string;
   rosterSheetUrl: string;
+  extraCitationSheetUrl?: string;
   quoteRuleRaw?: string;
   endingRuleRaw?: string;
   bibleRuleRaw?: string;

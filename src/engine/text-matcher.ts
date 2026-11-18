@@ -9,11 +9,13 @@ import type {
   RosterEntry,
 } from "../catalog/catalog-types";
 import type { CitationVariant, ScriptRow } from "../types/domain";
+import { stripOuterDoubleQuotes } from "./punctuation";
 
 export function normMatchKey(s: string): string {
   return (s || "")
     .normalize("NFKC")
     .toLowerCase()
+    .replace(/[（(]\s*s\s*[)）]/g, "")
     .replace(/^[\d\-_oO]+\s*/, "")
     .replace(/[《》“”""''‘’«»„‚()（）\[\]【】・·—\-_:：,，.。!?！？\s]+/gu, "");
 }
@@ -49,18 +51,18 @@ export function findArticleInCatalog(
     const aZh = normMatchKey(a.zhTitle);
     const aEn = normMatchKey(a.enTitle);
     const aSub = normMatchKey(a.zhSubtitleCite);
+    const aBrk = normMatchKey(a.zhBracketCite);
     if (leafKey && aZh && (aZh === leafKey || aZh.endsWith(leafKey))) return a;
     if (enKey && aEn && aEn === enKey) return a;
     if (fullKey && aSub && aSub.includes(leafKey) && leafKey.length >= 4) return a;
+    if (fullKey && aBrk && aBrk.includes(leafKey) && leafKey.length >= 4) return a;
   }
 
   if (zhCite.includes("……") || zhCite.includes("...")) {
     const [prefix, suffix] = leafZh.split(/……|\.\.\./).map(normMatchKey);
     for (const a of articles) {
       const aZh = normMatchKey(a.zhTitle);
-      if (prefix && aZh.includes(prefix) && (!suffix || aZh.endsWith(suffix))) {
-        return a;
-      }
+      if (prefix && aZh.includes(prefix) && (!suffix || aZh.endsWith(suffix))) return a;
     }
   }
   return null;
@@ -71,13 +73,10 @@ export function locateParagraphInManuscript(
   sourceRows: ScriptRow[],
 ): { matchedText: string; truncatedStart: boolean } | null {
   if (paragraphs.length === 0 || sourceRows.length === 0) return null;
-
   const firstRow = sourceRows[0];
   const lastRow = sourceRows[sourceRows.length - 1];
   const truncMatch = /涉及截取[：:]\s*(.+)$/u.exec(firstRow.remark.trim());
-  const firstEnProbe = normMatchKey(
-    truncMatch ? truncMatch[1] : firstRow.english,
-  ).slice(0, 32);
+  const firstEnProbe = normMatchKey(truncMatch ? truncMatch[1] : firstRow.english).slice(0, 32);
   const firstZhProbe = normMatchKey(firstRow.chinese).slice(0, 14);
   const lastZhProbe = normMatchKey(lastRow.chinese).slice(-12);
   const lastEnProbe = normMatchKey(lastRow.english).slice(-28);
@@ -86,10 +85,7 @@ export function locateParagraphInManuscript(
   for (let i = 0; i < paragraphs.length; i += 1) {
     const pZh = normMatchKey(paragraphs[i].chinese);
     const pEn = normMatchKey(paragraphs[i].english);
-    if (
-      (firstZhProbe.length >= 4 && pZh.includes(firstZhProbe)) ||
-      (firstEnProbe.length >= 8 && pEn.includes(firstEnProbe))
-    ) {
+    if ((firstZhProbe.length >= 4 && pZh.includes(firstZhProbe)) || (firstEnProbe.length >= 8 && pEn.includes(firstEnProbe))) {
       startIdx = i;
       break;
     }
@@ -100,68 +96,35 @@ export function locateParagraphInManuscript(
   for (let j = startIdx; j < Math.min(paragraphs.length, startIdx + 5); j += 1) {
     const pZh = normMatchKey(paragraphs[j].chinese);
     const pEn = normMatchKey(paragraphs[j].english);
-    if (
-      (lastZhProbe.length >= 4 && pZh.includes(lastZhProbe)) ||
-      (lastEnProbe.length >= 8 && pEn.includes(lastEnProbe))
-    ) {
+    if ((lastZhProbe.length >= 4 && pZh.includes(lastZhProbe)) || (lastEnProbe.length >= 8 && pEn.includes(lastEnProbe))) {
       endIdx = j;
       break;
     }
   }
 
-  const combinedTarget = paragraphs
-    .slice(startIdx, endIdx + 1)
-    .map((p) => p.target.trim())
-    .filter(Boolean)
-    .join(" ");
-
+  const combinedTarget = paragraphs.slice(startIdx, endIdx + 1).map((p) => p.target.trim()).filter(Boolean).join(" ");
   const fullParaZh = normMatchKey(paragraphs[startIdx].chinese);
   const allRowsZh = normMatchKey(sourceRows.map((r) => r.chinese).join(""));
 
   if (endIdx === startIdx && fullParaZh.length > allRowsZh.length + 12) {
-    const startRatio = Math.max(
-      0,
-      fullParaZh.indexOf(firstZhProbe) / Math.max(1, fullParaZh.length),
-    );
+    const startRatio = Math.max(0, fullParaZh.indexOf(firstZhProbe) / Math.max(1, fullParaZh.length));
     const endPos = fullParaZh.lastIndexOf(lastZhProbe);
-    const endRatio =
-      endPos >= 0
-        ? Math.min(1, (endPos + lastZhProbe.length) / Math.max(1, fullParaZh.length))
-        : 1;
+    const endRatio = endPos >= 0 ? Math.min(1, (endPos + lastZhProbe.length) / Math.max(1, fullParaZh.length)) : 1;
     if (startRatio > 0.06 || endRatio < 0.92) {
-      return {
-        matchedText: sliceBySentenceRatio(combinedTarget, startRatio, endRatio),
-        truncatedStart: Boolean(truncMatch),
-      };
+      return { matchedText: sliceBySentenceRatio(combinedTarget, startRatio, endRatio), truncatedStart: Boolean(truncMatch) };
     }
   }
-
-  return {
-    matchedText: combinedTarget,
-    truncatedStart: Boolean(truncMatch),
-  };
+  return { matchedText: combinedTarget, truncatedStart: Boolean(truncMatch) };
 }
 
-function sliceBySentenceRatio(
-  text: string,
-  startRatio: number,
-  endRatio: number,
-): string {
-  const sentences = text
-    .split(/(?<=[.!?。！？;；])\s+/u)
-    .map((s) => s.trim())
-    .filter(Boolean);
+function sliceBySentenceRatio(text: string, startRatio: number, endRatio: number): string {
+  const sentences = text.split(/(?<=[.!?。！？;；])\s+/u).map((s) => s.trim()).filter(Boolean);
   if (sentences.length <= 1) return text;
-
   const totalLen = text.length;
   let acc = 0;
   const picked: string[] = [];
   for (const s of sentences) {
-    const sStart = acc / totalLen;
-    const sEnd = (acc + s.length) / totalLen;
-    if (sEnd > startRatio - 0.04 && sStart < endRatio + 0.04) {
-      picked.push(s);
-    }
+    if ((acc + s.length) / totalLen > startRatio - 0.04 && acc / totalLen < endRatio + 0.04) picked.push(s);
     acc += s.length + 1;
   }
   return picked.length > 0 ? picked.join(" ") : text;
@@ -174,14 +137,8 @@ export function findBibleVerse(
 ): { text: string; targetCitationRef: string; truncatedStart: boolean } | null {
   const keyRef = normBibleRef(refHint);
   const firstEn = normMatchKey(verseRows[0]?.english ?? "").slice(0, 24);
-
-  let found: BibleEntry | undefined;
-  if (keyRef) {
-    found = entries.find((e) => normBibleRef(e.chapterRef) === keyRef);
-  }
-  if (!found && firstEn.length >= 8) {
-    found = entries.find((e) => normMatchKey(e.english).includes(firstEn));
-  }
+  let found = keyRef ? entries.find((e) => normBibleRef(e.chapterRef) === keyRef) : undefined;
+  if (!found && firstEn.length >= 8) found = entries.find((e) => normMatchKey(e.english).includes(firstEn));
   if (!found) return null;
 
   const raw = found.targetText.trim();
@@ -189,50 +146,77 @@ export function findBibleVerse(
   const targetCitationRef = trailingRefMatch
     ? `(${trailingRefMatch[1].trim()})`
     : `(${found.chapterRef || refHint.replace(/^[（(]|[)）.]$/g, "")})`;
-  const bodyOnly = trailingRefMatch
-    ? raw.slice(0, trailingRefMatch.index).trim()
-    : raw;
-
-  const trunc =
-    verseRows[0]?.remark.includes("涉及截取") ||
-    verseRows[0]?.english.includes("…");
-
+  const bodyOnly = trailingRefMatch ? raw.slice(0, trailingRefMatch.index).trim() : raw;
+  const trunc = verseRows[0]?.remark.includes("涉及截取") || verseRows[0]?.english.includes("…");
   return { text: bodyOnly, targetCitationRef, truncatedStart: Boolean(trunc) };
 }
 
-export function findIdiomMatch(
-  idioms: IdiomEntry[],
-  chinese: string,
-  english: string,
-): string | null {
+export function findIdiomMatch(idioms: IdiomEntry[], chinese: string, english: string): string | null {
   const zhKey = normMatchKey(chinese);
   const enKey = normMatchKey(english);
   for (const item of idioms) {
-    if (zhKey && item.zhVariants.some((v) => normMatchKey(v) === zhKey)) {
-      return item.targetText;
-    }
-    if (enKey && item.enVariants.some((v) => normMatchKey(v) === enKey)) {
-      return item.targetText;
-    }
+    if (zhKey && item.zhVariants.some((v) => normMatchKey(v) === zhKey)) return item.targetText;
+    if (enKey && item.enVariants.some((v) => normMatchKey(v) === enKey)) return item.targetText;
   }
   return null;
 }
 
-export function findHymnMatch(
-  hymns: HymnEntry[],
-  hint: string,
-): HymnEntry | null {
+export function findHymnMatch(hymns: HymnEntry[], hint: string): HymnEntry | null {
   const titleMatch = /《([^》]+)》/.exec(hint);
   const targetKey = normMatchKey(titleMatch ? titleMatch[1] : hint);
-  for (const h of hymns) {
-    if (
-      normMatchKey(h.zhTitle) === targetKey ||
-      normMatchKey(h.enTitle) === targetKey
-    ) {
-      return h;
+  return hymns.find((h) => normMatchKey(h.zhTitle) === targetKey || normMatchKey(h.enTitle) === targetKey) ?? null;
+}
+
+export function aggregateHymnSublinesForBlock(
+  hymnLines: ArticleParagraph[],
+  blockRows: ScriptRow[],
+): string[] | null {
+  if (hymnLines.length === 0 || blockRows.length === 0) return null;
+  let cursor = 0;
+  const out: string[] = [];
+
+  for (const br of blockRows) {
+    const kZh = normMatchKey(br.chinese);
+    const kEn = normMatchKey(br.english);
+    let matchedTarget: string | null = null;
+
+    const tryMatchAt = (startIdx: number): { text: string; nextIdx: number } | null => {
+      let accZh = "";
+      let accEn = "";
+      const targets: string[] = [];
+      for (let span = 1; span <= 5 && startIdx + span - 1 < hymnLines.length; span += 1) {
+        const hl = hymnLines[startIdx + span - 1];
+        accZh += normMatchKey(hl.chinese);
+        accEn += normMatchKey(hl.english);
+        targets.push(stripOuterDoubleQuotes(hl.target).trim());
+        const zhHit = Boolean(kZh && accZh && (accZh === kZh || (span === 1 && kZh === accZh + accZh)));
+        const enHit = Boolean(kEn && accEn && (accEn === kEn || (span === 1 && kEn === accEn + accEn)));
+        if (zhHit || enHit) return { text: targets.filter(Boolean).join(" "), nextIdx: startIdx + span };
+      }
+      return null;
+    };
+
+    for (let s = cursor; s < hymnLines.length; s += 1) {
+      const m = tryMatchAt(s);
+      if (m) {
+        matchedTarget = m.text;
+        cursor = m.nextIdx;
+        break;
+      }
     }
+    if (matchedTarget === null) {
+      for (let s = 0; s < cursor; s += 1) {
+        const m = tryMatchAt(s);
+        if (m) {
+          matchedTarget = m.text;
+          break;
+        }
+      }
+    }
+    if (matchedTarget === null) return null;
+    out.push(matchedTarget);
   }
-  return null;
+  return out;
 }
 
 export function resolveCitationText(
@@ -244,19 +228,14 @@ export function resolveCitationText(
   const enKey = normMatchKey(row.english);
 
   const pickFromPair = (pair: CitationPair): string => {
-    if (catalog.rule.singleCitationRowOnly) {
-      return pair.subtitleBand || pair.videoEffect;
-    }
+    if (catalog.rule.singleCitationRowOnly) return pair.subtitleBand || pair.videoEffect;
     return variant === "video_effect"
       ? pair.videoEffect || pair.subtitleBand
       : pair.subtitleBand || pair.videoEffect;
   };
 
   for (const pair of catalog.citations) {
-    if (
-      (zhKey && normMatchKey(pair.keyZh) === zhKey) ||
-      (enKey && normMatchKey(pair.keyEn) === enKey)
-    ) {
+    if ((zhKey && normMatchKey(pair.keyZh) === zhKey) || (enKey && normMatchKey(pair.keyEn) === enKey)) {
       const picked = pickFromPair(pair);
       if (picked) return picked;
     }
@@ -265,13 +244,13 @@ export function resolveCitationText(
   const hymn = findHymnMatch(catalog.hymns, row.chinese || row.filterCategory);
   if (hymn?.targetCitation) return hymn.targetCitation;
 
-  const article = findArticleInCatalog(
-    catalog.articles,
-    row.filterCategory || row.chinese,
-    row.chinese,
-    row.english,
-  );
-  if (article?.targetCite) return article.targetCite;
+  const article = findArticleInCatalog(catalog.articles, row.filterCategory || row.chinese, row.chinese, row.english);
+  if (article) {
+    const picked = variant === "video_effect"
+      ? article.targetBracketCite || article.targetCite
+      : article.targetCite || article.targetBracketCite;
+    if (picked) return picked;
+  }
 
   const volMatch = /卷([一二三四五六七1-7])/u.exec(row.chinese);
   if (volMatch && article?.targetTitle) {
@@ -279,9 +258,7 @@ export function resolveCitationText(
       if (pair.keyZh.includes(`卷${volMatch[1]}`)) {
         const stem = pickFromPair(pair);
         if (stem) {
-          if (variant === "video_effect" && stem.endsWith(").")) {
-            return `${stem.slice(0, -2)}. ${article.targetTitle}).`;
-          }
+          if (variant === "video_effect" && stem.endsWith(").")) return `${stem.slice(0, -2)}. ${article.targetTitle}).`;
           if (stem.endsWith(catalog.rule.doubleClose)) {
             return `${stem.slice(0, -catalog.rule.doubleClose.length)}. ${article.targetTitle}${catalog.rule.doubleClose}`;
           }
@@ -306,8 +283,7 @@ export function findRosterMatch(
     const eZhFull = normMatchKey(e.chinese);
     const eEnFull = normMatchKey(e.english);
     if ((zhKey && eZhFull === zhKey) || (enKey && eEnFull === enKey)) {
-      if (!firstLineOnly) return e;
-      return { ...e, targetText: e.targetText.split(/\r?\n/)[0].trim() };
+      return firstLineOnly ? { ...e, targetText: e.targetText.split(/\r?\n/)[0].trim() } : e;
     }
     if (firstLineOnly) {
       const eZhLine1 = normMatchKey(e.chinese.split(/\r?\n/)[0]);
@@ -332,18 +308,13 @@ export function lookupPhraseForNoteXx(
   if (fixed) return { value: fixed, fromRoster: false };
 
   for (const h of catalog.hymns) {
-    if (normMatchKey(h.enTitle) === key && h.targetTitle) {
-      return { value: h.targetTitle, fromRoster: false };
-    }
+    if (normMatchKey(h.enTitle) === key && h.targetTitle) return { value: h.targetTitle, fromRoster: false };
   }
 
   for (const a of catalog.articles) {
     const aEnClean = normMatchKey(a.enTitle.replace(/volume\s*\d+/i, ""));
     if ((normMatchKey(a.enTitle) === key || aEnClean === key) && a.targetTitle) {
-      return {
-        value: a.targetTitle.replace(/\s*(ТОМ|TOM|VOL\.?)\s*\d+$/i, "").trim(),
-        fromRoster: false,
-      };
+      return { value: a.targetTitle.replace(/\s*(ТОМ|TOM|VOL\.?)\s*\d+$/i, "").trim(), fromRoster: false };
     }
   }
 
@@ -351,7 +322,6 @@ export function lookupPhraseForNoteXx(
     const r = findRosterMatch(catalog.rosterEntries, "", englishPhrase, true);
     if (r) return { value: r.targetText, fromRoster: true };
   }
-
   return null;
 }
 
@@ -367,8 +337,7 @@ export function replaceNoteXxPlaceholders(
 
   for (let i = 0; i < lines.length; i += 1) {
     if (lines[i].trim() === "XX" && i > 0) {
-      const prevLine = lines[i - 1].trim();
-      const found = lookupPhraseForNoteXx(catalog, prevLine, enableRoster);
+      const found = lookupPhraseForNoteXx(catalog, lines[i - 1].trim(), enableRoster);
       if (found) {
         lines[i] = found.value;
         replacedCount += 1;
@@ -378,11 +347,5 @@ export function replaceNoteXxPlaceholders(
       }
     }
   }
-
-  return {
-    updatedNote: lines.join("\n"),
-    replacedCount,
-    missingCount,
-    usedRoster,
-  };
+  return { updatedNote: lines.join("\n"), replacedCount, missingCount, usedRoster };
 }

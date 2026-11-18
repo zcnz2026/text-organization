@@ -11,15 +11,30 @@ import type {
   PunctuationRule,
   ScriptSheetDocument,
 } from "../types/domain";
+import {
+  DEFAULT_LANG_SHEET_COLS,
+  DEFAULT_SHARED_SHEETS_CONFIG,
+  DEFAULT_SOURCE_COL_CONFIG,
+  type PerLanguageSheetColumnConfig,
+  type SharedSheetsConfig,
+  type SourceScriptColumnConfig,
+} from "../types/schema-config";
 
 const SETTINGS_STORAGE_KEY = "script_lang_workbench_settings_v1";
 const CUSTOM_RULES_KEY = "script_lang_custom_rules_v1";
 const AI_SETTINGS_KEY = "script_lang_ai_config_v1";
+const SCHEMA_STORAGE_KEY = "script_lang_schema_config_v1";
 
 export type RowFilterMode = "all" | "extractable" | "matched" | "review";
 
 export interface AppState {
   settings: WorkbenchSettings;
+  cloudConfigUrl: string;
+  sourceColConfig: SourceScriptColumnConfig;
+  sharedSheets: SharedSheetsConfig;
+  colsByLang: Record<string, PerLanguageSheetColumnConfig>;
+  hymnEpisodeKeyword: string;
+  episodeHymnOverrides: Record<string, string>;
   auth: OAuthSessionInfo;
   geminiSummary: { count: number; maskedKeys: string[] };
   geminiModel: GeminiModelId;
@@ -40,6 +55,17 @@ export interface AppState {
   notice: { type: "info" | "error"; message: string } | null;
 }
 
+interface PersistedSchemaBundle {
+  cloudConfigUrl: string;
+  sourceColConfig: SourceScriptColumnConfig;
+  sharedSheets: SharedSheetsConfig;
+  colsByLang: Record<string, PerLanguageSheetColumnConfig>;
+  linksByLangObj: Record<string, LanguageResourceLinks>;
+  availableLanguages: string[];
+  hymnEpisodeKeyword: string;
+  episodeHymnOverrides: Record<string, string>;
+}
+
 function loadSavedSettings(): WorkbenchSettings {
   const defaults: WorkbenchSettings = {
     sourceSpreadsheetUrl: "",
@@ -56,6 +82,46 @@ function loadSavedSettings(): WorkbenchSettings {
     const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (!raw) return defaults;
     return { ...defaults, ...JSON.parse(raw) };
+  } catch {
+    return defaults;
+  }
+}
+
+function loadSchemaBundle(): PersistedSchemaBundle {
+  const presetLangs = BUILTIN_PUNCTUATION_RULES.map((r) => r.langName);
+  const defaults: PersistedSchemaBundle = {
+    cloudConfigUrl: "",
+    sourceColConfig: { ...DEFAULT_SOURCE_COL_CONFIG },
+    sharedSheets: { ...DEFAULT_SHARED_SHEETS_CONFIG },
+    colsByLang: {},
+    linksByLangObj: {},
+    availableLanguages: presetLangs,
+    hymnEpisodeKeyword: "",
+    episodeHymnOverrides: {},
+  };
+  try {
+    const raw = localStorage.getItem(SCHEMA_STORAGE_KEY);
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw) as Partial<PersistedSchemaBundle>;
+    const mergedLangs = Array.from(
+      new Set([...presetLangs, ...(parsed.availableLanguages ?? [])]),
+    );
+    return {
+      cloudConfigUrl: parsed.cloudConfigUrl ?? "",
+      sourceColConfig: {
+        ...DEFAULT_SOURCE_COL_CONFIG,
+        ...(parsed.sourceColConfig ?? {}),
+      },
+      sharedSheets: {
+        ...DEFAULT_SHARED_SHEETS_CONFIG,
+        ...(parsed.sharedSheets ?? {}),
+      },
+      colsByLang: parsed.colsByLang ?? {},
+      linksByLangObj: parsed.linksByLangObj ?? {},
+      availableLanguages: mergedLangs,
+      hymnEpisodeKeyword: parsed.hymnEpisodeKeyword ?? "",
+      episodeHymnOverrides: parsed.episodeHymnOverrides ?? {},
+    };
   } catch {
     return defaults;
   }
@@ -89,9 +155,24 @@ function loadAiPrefs(): {
 }
 
 const aiPrefs = loadAiPrefs();
+const savedSettings = loadSavedSettings();
+const schemaBundle = loadSchemaBundle();
+
+if (!schemaBundle.cloudConfigUrl && savedSettings.resourceMatrixUrl) {
+  schemaBundle.cloudConfigUrl = savedSettings.resourceMatrixUrl;
+}
+if (!schemaBundle.sharedSheets.rosterUrl && savedSettings.rosterSpreadsheetUrl) {
+  schemaBundle.sharedSheets.rosterUrl = savedSettings.rosterSpreadsheetUrl;
+}
 
 export const store: AppState = {
-  settings: loadSavedSettings(),
+  settings: savedSettings,
+  cloudConfigUrl: schemaBundle.cloudConfigUrl,
+  sourceColConfig: schemaBundle.sourceColConfig,
+  sharedSheets: schemaBundle.sharedSheets,
+  colsByLang: schemaBundle.colsByLang,
+  hymnEpisodeKeyword: schemaBundle.hymnEpisodeKeyword,
+  episodeHymnOverrides: schemaBundle.episodeHymnOverrides,
   auth: {
     hasClientJson: false,
     authorized: false,
@@ -103,9 +184,9 @@ export const store: AppState = {
   geminiModel: aiPrefs.model,
   geminiRotation: aiPrefs.rotation,
   geminiEnabled: aiPrefs.enabled,
-  availableLanguages: BUILTIN_PUNCTUATION_RULES.slice(0, 8).map((r) => r.langName),
+  availableLanguages: schemaBundle.availableLanguages,
   customRules: loadCustomRules(),
-  linksByLang: new Map(),
+  linksByLang: new Map(Object.entries(schemaBundle.linksByLangObj)),
   scriptDoc: null,
   isDemoData: false,
   runsByLang: new Map(),
@@ -118,6 +199,13 @@ export const store: AppState = {
   notice: null,
 };
 
+export function getLangCols(lang: string): PerLanguageSheetColumnConfig {
+  return {
+    ...DEFAULT_LANG_SHEET_COLS,
+    ...(store.colsByLang[lang] ?? {}),
+  };
+}
+
 const listeners = new Set<() => void>();
 
 export function subscribeState(fn: () => void): () => void {
@@ -127,6 +215,10 @@ export function subscribeState(fn: () => void): () => void {
 
 export function notifyStateChanged(): void {
   try {
+    store.settings.resourceMatrixUrl = store.cloudConfigUrl;
+    if (store.sharedSheets.rosterUrl) {
+      store.settings.rosterSpreadsheetUrl = store.sharedSheets.rosterUrl;
+    }
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(store.settings));
     localStorage.setItem(CUSTOM_RULES_KEY, JSON.stringify(store.customRules));
     localStorage.setItem(
@@ -137,6 +229,21 @@ export function notifyStateChanged(): void {
         rotation: store.geminiRotation,
       }),
     );
+    const linksByLangObj: Record<string, LanguageResourceLinks> = {};
+    for (const [k, v] of store.linksByLang.entries()) {
+      linksByLangObj[k] = v;
+    }
+    const bundle: PersistedSchemaBundle = {
+      cloudConfigUrl: store.cloudConfigUrl,
+      sourceColConfig: store.sourceColConfig,
+      sharedSheets: store.sharedSheets,
+      colsByLang: store.colsByLang,
+      linksByLangObj,
+      availableLanguages: store.availableLanguages,
+      hymnEpisodeKeyword: store.hymnEpisodeKeyword,
+      episodeHymnOverrides: store.episodeHymnOverrides,
+    };
+    localStorage.setItem(SCHEMA_STORAGE_KEY, JSON.stringify(bundle));
   } catch {
     // ignore storage quota errors
   }

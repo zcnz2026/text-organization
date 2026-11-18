@@ -22,6 +22,7 @@ export interface ArticleCatalogEntry {
   zhSubtitleCite: string;
   zhBracketCite: string;
   targetCite: string;
+  targetBracketCite?: string;
 }
 
 export interface ArticleParagraph {
@@ -70,5 +71,6 @@ export interface LanguageCatalog {
   idioms: IdiomEntry[];
   hymns: HymnEntry[];
   lordsPrayer: ArticleParagraph[];
+  lordsPrayerFullText?: string;
   rosterEntries: RosterEntry[];
 }

@@ -11,6 +11,12 @@ export const icons = {
   quotes: wrap(
     `<path d="M4.5 7.5h3.5v3.5c0 2-1.2 3.2-3 3.8M12 7.5h3.5v3.5c0 2-1.2 3.2-3 3.8"/>`,
   ),
+  tableGrid: wrap(
+    `<rect x="3" y="3.5" width="14" height="13" rx="1.8"/><path d="M3 8h14M8.2 8v8.5M12.8 8v8.5"/>`,
+  ),
+  columns: wrap(
+    `<rect x="3" y="3.5" width="14" height="13" rx="1.8"/><path d="M7.6 3.5v13M12.4 3.5v13"/>`,
+  ),
   cloudSync: wrap(
     `<path d="M6.2 15.5h8.1a3.2 3.2 0 0 0 .4-6.4A4.6 4.6 0 0 0 5.8 7.8a3.8 3.8 0 0 0 .4 7.7Z"/><path d="m8.2 11.8 1.8-1.8 1.8 1.8M10 10v4"/>`,
   ),

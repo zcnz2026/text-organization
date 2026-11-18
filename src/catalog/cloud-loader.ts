@@ -1,21 +1,40 @@
-import type { GoogleDocsClient } from "../google/docs-client";
+import type {
+  GoogleDocsClient,
+  ManuscriptColumnOrder,
+} from "../google/docs-client";
 import type { GoogleSheetsClient } from "../google/sheets-client";
 import { parseGoogleResourceUrl } from "../google/url-parser";
 import type { LanguageResourceLinks, PunctuationRule } from "../types/domain";
+import {
+  type CloudWorkspaceConfig,
+  DEFAULT_LANG_SHEET_COLS,
+  DEFAULT_SHARED_SHEETS_CONFIG,
+  type PerLanguageSheetColumnConfig,
+  type SharedSheetsConfig,
+} from "../types/schema-config";
 import type {
   ArticleParagraph,
   LanguageCatalog,
   RichSheetGrid,
 } from "./catalog-types";
+import { parseCloudConfigSheets } from "./config-template";
 import {
   parseArticleCatalogSheet,
   parseBibleLibrarySheet,
   parseCommonTermsSheet,
+  parseHymnCitationsSheet,
   parseHymnSheet,
   parseIdiomGlossarySheet,
   parseLordsPrayerSheet,
   parseRosterSheet,
+  parseWordCitationsSheet,
 } from "./sheet-parsers";
+
+export interface BuildLanguageCatalogOptions {
+  sharedSheets?: Partial<SharedSheetsConfig>;
+  langCols?: Partial<PerLanguageSheetColumnConfig>;
+  hymnEpisodeKeyword?: string;
+}
 
 export class CloudCatalogLoader {
   private sheets: GoogleSheetsClient;
@@ -28,92 +47,244 @@ export class CloudCatalogLoader {
     this.docs = docs;
   }
 
-  private async loadGridCached(rawUrl: string): Promise<RichSheetGrid> {
+  private async loadGridCached(
+    rawUrl: string,
+    overrideGidOrTitle?: number | string | null,
+  ): Promise<RichSheetGrid> {
     const parsed = parseGoogleResourceUrl(rawUrl, "sheet");
     if (!parsed || parsed.kind !== "sheet") return [];
-    const key = `${parsed.id}:${parsed.gid ?? "first"}`;
+    const targetGid = overrideGidOrTitle ?? parsed.gid;
+    const key = `${parsed.id}:${targetGid ?? "first"}`;
     const hit = this.gridCache.get(key);
     if (hit) return hit;
 
-    const { grid } = await this.sheets.fetchRichGrid(parsed.id, parsed.gid);
+    const { grid } = await this.sheets.fetchRichGrid(parsed.id, targetGid);
     this.gridCache.set(key, grid);
     return grid;
   }
 
-  async loadArticleManuscript(rawUrl: string): Promise<ArticleParagraph[]> {
+  private async loadHymnGridWithEpisodeKeyword(
+    rawUrl: string,
+    episodeKeyword?: string,
+  ): Promise<RichSheetGrid> {
+    if (!rawUrl) return [];
+    const parsed = parseGoogleResourceUrl(rawUrl, "sheet");
+    if (!parsed || parsed.kind !== "sheet") return [];
+
+    const kw = (episodeKeyword || "").trim().toLowerCase();
+    if (kw) {
+      const meta = await this.sheets.getSpreadsheetMeta(parsed.id);
+      const exactMatch = meta.sheets.find((s) =>
+        s.title.toLowerCase().includes(kw),
+      );
+      if (exactMatch) {
+        return this.loadGridCached(rawUrl, exactMatch.sheetId);
+      }
+      const numMatch = /(\d+)\s*期/.exec(kw);
+      if (numMatch) {
+        const epNum = `${numMatch[1]}期`;
+        const epTab = meta.sheets.find((s) => s.title.includes(epNum));
+        if (epTab) {
+          return this.loadGridCached(rawUrl, epTab.sheetId);
+        }
+      }
+    }
+
+    return this.loadGridCached(rawUrl);
+  }
+
+  async loadCloudWorkspaceConfig(
+    spreadsheetUrlOrId: string,
+  ): Promise<CloudWorkspaceConfig> {
+    const parsed = parseGoogleResourceUrl(spreadsheetUrlOrId, "sheet");
+    if (!parsed || parsed.kind !== "sheet") {
+      throw new Error("无效的云端总配置表 Google Sheet 链接或 ID");
+    }
+
+    const meta = await this.sheets.getSpreadsheetMeta(parsed.id);
+    const sheetsByName = new Map<string, RichSheetGrid>();
+    await Promise.all(
+      meta.sheets.map(async (tab) => {
+        const grid = await this.loadGridCached(spreadsheetUrlOrId, tab.sheetId);
+        sheetsByName.set(tab.title, grid);
+      }),
+    );
+
+    return parseCloudConfigSheets(sheetsByName);
+  }
+
+  async loadArticleManuscript(
+    rawUrl: string,
+    cols?:
+      | ManuscriptColumnOrder
+      | Pick<
+          PerLanguageSheetColumnConfig,
+          | "manuscriptZhColIndex"
+          | "manuscriptEnColIndex"
+          | "manuscriptTargetColIndex"
+        >,
+  ): Promise<ArticleParagraph[]> {
     const parsed = parseGoogleResourceUrl(rawUrl, "doc");
     if (!parsed) return [];
-    const hit = this.docCache.get(`${parsed.kind}:${parsed.id}:${parsed.gid ?? ""}`);
+
+    const order: ManuscriptColumnOrder =
+      cols && "zhCol1Based" in cols
+        ? cols
+        : {
+            zhCol1Based:
+              cols?.manuscriptZhColIndex ??
+              DEFAULT_LANG_SHEET_COLS.manuscriptZhColIndex,
+            enCol1Based:
+              cols?.manuscriptEnColIndex ??
+              DEFAULT_LANG_SHEET_COLS.manuscriptEnColIndex,
+            targetCol1Based:
+              cols?.manuscriptTargetColIndex ??
+              DEFAULT_LANG_SHEET_COLS.manuscriptTargetColIndex,
+          };
+
+    const cacheKey = `${parsed.kind}:${parsed.id}:${parsed.gid ?? ""}:${order.zhCol1Based},${order.enCol1Based},${order.targetCol1Based}`;
+    const hit = this.docCache.get(cacheKey);
     if (hit) return hit;
 
     let paragraphs: ArticleParagraph[] = [];
     if (parsed.kind === "doc") {
-      paragraphs = await this.docs.fetchArticleParagraphs(parsed.id);
+      paragraphs = await this.docs.fetchArticleParagraphs(parsed.id, order);
     } else {
       const grid = await this.loadGridCached(rawUrl);
+      const zIdx = Math.max(0, order.zhCol1Based - 1);
+      const eIdx = Math.max(0, order.enCol1Based - 1);
+      const tIdx = Math.max(0, order.targetCol1Based - 1);
       paragraphs = grid
-        .filter((r) => (r[2]?.text || r[1]?.text || "").trim().length > 0)
+        .filter((r) => (r[tIdx]?.text || r[eIdx]?.text || "").trim().length > 0)
         .map((r) => ({
-          chinese: r[0]?.text ?? "",
-          english: r.length >= 3 ? (r[1]?.text ?? "") : "",
-          target: r.length >= 3 ? (r[2]?.text ?? "") : (r[1]?.text ?? ""),
+          chinese: r[zIdx]?.text ?? "",
+          english: r.length >= 3 ? (r[eIdx]?.text ?? "") : "",
+          target:
+            r.length >= 3 ? (r[tIdx]?.text ?? "") : (r[1]?.text ?? ""),
         }));
     }
 
-    this.docCache.set(`${parsed.kind}:${parsed.id}:${parsed.gid ?? ""}`, paragraphs);
+    this.docCache.set(cacheKey, paragraphs);
     return paragraphs;
   }
 
   async buildLanguageCatalog(
     links: LanguageResourceLinks,
     rule: PunctuationRule,
+    opts?: BuildLanguageCatalogOptions,
   ): Promise<LanguageCatalog> {
+    const sharedCfg: SharedSheetsConfig = {
+      ...DEFAULT_SHARED_SHEETS_CONFIG,
+      ...(opts?.sharedSheets ?? {}),
+    };
+    const langCols: PerLanguageSheetColumnConfig = {
+      ...DEFAULT_LANG_SHEET_COLS,
+      ...(opts?.langCols ?? {}),
+    };
+
+    const commonUrl = links.commonTermsUrl || sharedCfg.commonTermsUrl;
+    const wordCitUrl =
+      links.extraCitationSheetUrl || sharedCfg.wordCitationsUrl;
+    const hymnCitUrl = sharedCfg.hymnCitationsUrl;
+    const prayerUrl = links.lordsPrayerUrl || sharedCfg.lordsPrayerUrl;
+    const rosterUrl = links.rosterSheetUrl || sharedCfg.rosterUrl;
+
     const [
       articleGrid,
       bibleGrid,
       idiomGrid,
       commonTermsGrid,
       godSaysGrid,
+      wordCitationsGrid,
+      hymnCitationsGrid,
       hymnGrid,
       prayerGrid,
       rosterGrid,
     ] = await Promise.all([
-      links.articleCatalogUrl ? this.loadGridCached(links.articleCatalogUrl) : Promise.resolve([]),
-      links.bibleSheetUrl ? this.loadGridCached(links.bibleSheetUrl) : Promise.resolve([]),
-      links.idiomSheetUrl ? this.loadGridCached(links.idiomSheetUrl) : Promise.resolve([]),
-      links.commonTermsUrl ? this.loadGridCached(links.commonTermsUrl) : Promise.resolve([]),
-      links.godSaysUrl && links.godSaysUrl !== links.commonTermsUrl
+      links.articleCatalogUrl
+        ? this.loadGridCached(links.articleCatalogUrl)
+        : Promise.resolve([]),
+      links.bibleSheetUrl
+        ? this.loadGridCached(links.bibleSheetUrl)
+        : Promise.resolve([]),
+      links.idiomSheetUrl
+        ? this.loadGridCached(links.idiomSheetUrl)
+        : Promise.resolve([]),
+      commonUrl ? this.loadGridCached(commonUrl) : Promise.resolve([]),
+      links.godSaysUrl && links.godSaysUrl !== commonUrl
         ? this.loadGridCached(links.godSaysUrl)
         : Promise.resolve([]),
-      links.hymnSheetUrl ? this.loadGridCached(links.hymnSheetUrl) : Promise.resolve([]),
-      links.lordsPrayerUrl ? this.loadGridCached(links.lordsPrayerUrl) : Promise.resolve([]),
-      links.rosterSheetUrl ? this.loadGridCached(links.rosterSheetUrl) : Promise.resolve([]),
+      wordCitUrl && wordCitUrl !== commonUrl
+        ? this.loadGridCached(wordCitUrl)
+        : Promise.resolve([]),
+      hymnCitUrl && hymnCitUrl !== commonUrl && hymnCitUrl !== wordCitUrl
+        ? this.loadGridCached(hymnCitUrl)
+        : Promise.resolve([]),
+      links.hymnSheetUrl
+        ? this.loadHymnGridWithEpisodeKeyword(
+            links.hymnSheetUrl,
+            opts?.hymnEpisodeKeyword,
+          )
+        : Promise.resolve([]),
+      prayerUrl ? this.loadGridCached(prayerUrl) : Promise.resolve([]),
+      rosterUrl ? this.loadGridCached(rosterUrl) : Promise.resolve([]),
     ]);
 
-    const commonA = parseCommonTermsSheet(commonTermsGrid, links.langName);
+    const commonA = parseCommonTermsSheet(
+      commonTermsGrid,
+      links.langName,
+      sharedCfg,
+    );
     const commonB =
       godSaysGrid.length > 0
-        ? parseCommonTermsSheet(godSaysGrid, links.langName)
-        : { godSaysText: "", citations: [], fixedTerms: new Map<string, string>() };
+        ? parseCommonTermsSheet(godSaysGrid, links.langName, sharedCfg)
+        : {
+            godSaysText: "",
+            citations: [],
+            fixedTerms: new Map<string, string>(),
+          };
+
+    const wordCites =
+      wordCitationsGrid.length > 0
+        ? parseWordCitationsSheet(wordCitationsGrid, links.langName, sharedCfg)
+        : [];
+    const hymnCites =
+      hymnCitationsGrid.length > 0
+        ? parseHymnCitationsSheet(hymnCitationsGrid, links.langName, sharedCfg)
+        : [];
 
     const mergedFixed = new Map<string, string>([
       ...commonA.fixedTerms,
       ...commonB.fixedTerms,
     ]);
 
+    const parsedPrayer = parseLordsPrayerSheet(
+      prayerGrid,
+      links.langName,
+      sharedCfg,
+    );
+
     return {
       langName: links.langName,
       rule,
       godSaysText: commonB.godSaysText || commonA.godSaysText,
       commonFixedTerms: mergedFixed,
-      citations: [...commonA.citations, ...commonB.citations],
-      articles: parseArticleCatalogSheet(articleGrid),
+      citations: [
+        ...commonA.citations,
+        ...commonB.citations,
+        ...wordCites,
+        ...hymnCites,
+      ],
+      articles: parseArticleCatalogSheet(articleGrid, opts?.langCols),
       articleDocsCache: new Map(),
-      bibleEntries: parseBibleLibrarySheet(bibleGrid),
-      idioms: parseIdiomGlossarySheet(idiomGrid),
-      hymns: parseHymnSheet(hymnGrid),
-      lordsPrayer: parseLordsPrayerSheet(prayerGrid, links.langName),
-      rosterEntries: parseRosterSheet(rosterGrid, links.langName),
+      bibleEntries: parseBibleLibrarySheet(bibleGrid, opts?.langCols),
+      idioms: parseIdiomGlossarySheet(idiomGrid, opts?.langCols),
+      hymns: parseHymnSheet(hymnGrid, langCols),
+      lordsPrayer: parsedPrayer.lines,
+      ...(parsedPrayer.fullText
+        ? { lordsPrayerFullText: parsedPrayer.fullText }
+        : {}),
+      rosterEntries: parseRosterSheet(rosterGrid, links.langName, sharedCfg),
     };
   }
 }

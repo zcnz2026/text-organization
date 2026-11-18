@@ -343,7 +343,7 @@ dialog {
   padding: 0;
   max-inline-size: min(640px, 94vw);
   inline-size: 100%;
-  box-shadow: 0 20px 48px rgb(0 0 0 / 0.26);
+  box-shadow: 0 20px 48px color-mix(in srgb, var(--text-primary) 26%, transparent);
 }
 
 dialog:modal {
@@ -351,7 +351,7 @@ dialog:modal {
 }
 
 dialog::backdrop {
-  background-color: rgb(9 14 20 / 0.48);
+  background-color: color-mix(in srgb, var(--text-primary) 48%, transparent);
   overflow: hidden;
   overscroll-behavior: contain;
 }

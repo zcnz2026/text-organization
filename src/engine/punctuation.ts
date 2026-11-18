@@ -1,9 +1,10 @@
 import type { PunctuationRule } from "../types/domain";
 
-const ANY_DOUBLE_OPEN_RE = /^[\s]*([«„“""❝]+)/u;
-const ANY_DOUBLE_CLOSE_RE = /([»”“""❞]+)([\s.,。，!?！？]*)$/u;
-const APOSTROPHE_BETWEEN_LETTERS_RE = /(\p{L})['’ʼ](\p{L})/gu;
-const SINGLE_QUOTED_SPAN_RE = /(^|[^\p{L}])['‘‚‹]([^'’‘‚‹›\n]+?)['’‘›](?=[^\p{L}]|$)/gu;
+const ANY_DOUBLE_OPEN_RE = /^[\s]*([«„“""❝「『]+)/u;
+const ANY_DOUBLE_CLOSE_RE = /([»”“""❞」』]+)([\s.,。，!?！？।។။]*)$/u;
+const APOSTROPHE_BETWEEN_LETTERS_RE = /([\p{L}\p{M}\p{N}])['’ʼ]([\p{L}\p{M}\p{N}])/gu;
+const SINGLE_QUOTED_SPAN_RE =
+  /(^|[^\p{L}\p{M}\p{N}])['‘‚‹]([^'’‘‚‹›\n]+?)['’‘›](?=[^\p{L}\p{M}\p{N}]|$)/gu;
 
 function normalizeInnerQuotesAndApostrophes(
   text: string,
@@ -25,8 +26,8 @@ function normalizeInnerQuotesAndApostrophes(
 export function stripOuterDoubleQuotes(text: string): string {
   return text
     .trim()
-    .replace(/^([«„“""《]+)/u, "")
-    .replace(/([»”“""》]+)([.,。，]?)$/u, "$2")
+    .replace(/^([«„“""《「『]+)/u, "")
+    .replace(/([»”“""》」』]+)([.,。，।។။]?)$/u, "$2")
     .trim();
 }
 
@@ -52,7 +53,7 @@ export function formatQuotedBlockLines(
     trailingPunct = closeMatch[2].trim();
   }
 
-  const endCharMatch = /([.,!?…。，！？]+)$/u.exec(last);
+  const endCharMatch = /([.,!?…。，！？।។။]+)$/u.exec(last);
   let innerEndPunct = "";
   if (endCharMatch) {
     innerEndPunct = endCharMatch[1];
@@ -60,21 +61,26 @@ export function formatQuotedBlockLines(
   }
 
   const effectivePunct = innerEndPunct || trailingPunct;
-  const normalizedPunct =
-    effectivePunct === "。"
-      ? "."
-      : effectivePunct === "，"
-        ? ","
-        : effectivePunct;
+  const isPeriodLike = /^[.。।។။]+$/u.test(effectivePunct);
+  const normalizedPunct = isPeriodLike
+    ? "."
+    : effectivePunct === "，"
+      ? ","
+      : effectivePunct;
 
+  const periodChar = rule.sentencePeriodChar ?? ".";
   const putPeriodInside =
     rule.periodMode === "inside" ||
     (rule.periodMode === "sentence_inside_phrase_outside" && isFullSentence);
 
   if (normalizedPunct === ".") {
-    lines[lastIdx] = putPeriodInside
-      ? `${last}.${rule.doubleClose}`
-      : `${last}${rule.doubleClose}.`;
+    if (periodChar === "") {
+      lines[lastIdx] = `${last}${rule.doubleClose}`;
+    } else {
+      lines[lastIdx] = putPeriodInside
+        ? `${last}${periodChar}${rule.doubleClose}`
+        : `${last}${rule.doubleClose}${periodChar}`;
+    }
   } else if (normalizedPunct === ",") {
     lines[lastIdx] = rule.commaInsideQuote
       ? `${last},${rule.doubleClose}`
@@ -95,7 +101,7 @@ export function formatStandaloneTitle(
   rule: PunctuationRule,
 ): string {
   const core = normalizeInnerQuotesAndApostrophes(
-    stripOuterDoubleQuotes(rawTitle).replace(/[.,。，]+$/u, "").trim(),
+    stripOuterDoubleQuotes(rawTitle).replace(/[.,。，।។။]+$/u, "").trim(),
     rule,
   );
   const srcEn = (sourceEnglish || "").trim();
@@ -106,6 +112,7 @@ export function formatStandaloneTitle(
     !wantsComma &&
     (srcZh.endsWith("。") || srcEn.endsWith('."') || srcEn.endsWith("."));
 
+  const periodChar = rule.sentencePeriodChar ?? ".";
   const periodInside = rule.periodMode === "inside";
   if (wantsComma) {
     return rule.commaInsideQuote
@@ -113,9 +120,12 @@ export function formatStandaloneTitle(
       : `${rule.doubleOpen}${core}${rule.doubleClose},`;
   }
   if (wantsPeriod) {
+    if (periodChar === "") {
+      return `${rule.doubleOpen}${core}${rule.doubleClose}`;
+    }
     return periodInside
-      ? `${rule.doubleOpen}${core}.${rule.doubleClose}`
-      : `${rule.doubleOpen}${core}${rule.doubleClose}.`;
+      ? `${rule.doubleOpen}${core}${periodChar}${rule.doubleClose}`
+      : `${rule.doubleOpen}${core}${rule.doubleClose}${periodChar}`;
   }
   return `${rule.doubleOpen}${core}${rule.doubleClose}`;
 }
@@ -128,7 +138,7 @@ export function formatBibleBlockAndCitation(
   const cleanRef = (rawCitationRef || "")
     .trim()
     .replace(/^[（(]?/, "(")
-    .replace(/[)）]?[.,。，]*$/, ")");
+    .replace(/[)）]?[.,。，।។။]*$/, ")");
 
   const lines = rawVerseLines.map((l) =>
     normalizeInnerQuotesAndApostrophes(l.trim(), rule),
@@ -140,13 +150,17 @@ export function formatBibleBlockAndCitation(
   lines[0] = `${rule.doubleOpen}${lines[0].replace(ANY_DOUBLE_OPEN_RE, "")}`;
   const lastIdx = lines.length - 1;
   let last = lines[lastIdx].replace(ANY_DOUBLE_CLOSE_RE, "");
-  last = last.replace(/[.,。，]+$/u, "");
+  last = last.replace(/[.,。，।។။]+$/u, "");
 
+  const periodChar = rule.sentencePeriodChar ?? ".";
   if (rule.bibleCitationMode === "period_inside_quote_no_trailing") {
-    lines[lastIdx] = `${last}.${rule.doubleClose}`;
+    lines[lastIdx] = `${last}${periodChar}${rule.doubleClose}`;
     return { verseLines: lines, citationText: cleanRef };
   }
 
   lines[lastIdx] = `${last}${rule.doubleClose}`;
-  return { verseLines: lines, citationText: `${cleanRef}.` };
+  return {
+    verseLines: lines,
+    citationText: periodChar ? `${cleanRef}${periodChar}` : cleanRef,
+  };
 }

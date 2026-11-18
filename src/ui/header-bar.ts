@@ -6,6 +6,7 @@ export function renderHeaderBar(
   actions: {
     openOAuthDialog: () => void;
     openGeminiDialog: () => void;
+    openCatalogConfigDialog: () => void;
     openRulesDialog: () => void;
   },
 ): void {
@@ -33,7 +34,7 @@ export function renderHeaderBar(
           rel="noopener noreferrer"
           class="version-link"
           title="打开 GitHub 仓库与版本发布记录"
-        >v0.1.0 · 版本库</a>
+        >v0.2.0 · 版本库</a>
       </div>
       <div class="topbar-actions">
         <button type="button" id="btn-open-oauth" class="btn ${oauthConnected ? "btn-connected" : ""}">
@@ -43,6 +44,10 @@ export function renderHeaderBar(
         <button type="button" id="btn-open-gemini" class="btn">
           ${icons.key}
           <span>${esc(geminiLabel)}</span>
+        </button>
+        <button type="button" id="btn-open-catalog-cfg" class="btn">
+          ${icons.tableGrid}
+          <span>资源与列配置清单</span>
         </button>
         <button type="button" id="btn-open-rules" class="btn">
           ${icons.quotes}
@@ -63,6 +68,9 @@ export function renderHeaderBar(
   container
     .querySelector("#btn-open-gemini")
     ?.addEventListener("click", actions.openGeminiDialog);
+  container
+    .querySelector("#btn-open-catalog-cfg")
+    ?.addEventListener("click", actions.openCatalogConfigDialog);
   container
     .querySelector("#btn-open-rules")
     ?.addEventListener("click", actions.openRulesDialog);

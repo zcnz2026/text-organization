@@ -1,16 +1,20 @@
 import { hostBridge } from "../platform/bridge";
 import { mountAuthDialogs } from "./auth-dialogs";
+import { mountCatalogConfigDialog } from "./catalog-config-dialog";
 import { renderHeaderBar } from "./header-bar";
 import { renderPreviewStage } from "./preview-table";
 import { mountRulesDialog } from "./rules-dialog";
 import {
+  downloadConfigTemplateXlsx,
   exportCurrentRunsXlsx,
   importLocalCsvFile,
   loadCloudSourceAndMatrix,
   loadSampleDemo,
+  refreshCloudConfigFromSheet,
   runMultiLanguageExtraction,
   syncReviewedSheetsToCloud,
 } from "./runner";
+import { mountSourceColsDialog } from "./source-cols-dialog";
 import { notifyStateChanged, store, subscribeState } from "./state";
 import { renderTaskPanel } from "./task-panel";
 
@@ -60,12 +64,17 @@ export async function mountWorkbenchApp(appRoot: HTMLElement): Promise<void> {
 
   const { openOAuthDialog, openGeminiDialog } = mountAuthDialogs(appRoot);
   const { openRulesDialog } = mountRulesDialog(appRoot);
+  const { openSourceColsDialog } = mountSourceColsDialog(appRoot);
+  const { openCatalogConfigDialog } = mountCatalogConfigDialog(appRoot, {
+    onDownloadTemplateXlsx: downloadConfigTemplateXlsx,
+  });
   installDialogLightDismissFallback(appRoot);
 
   const renderAll = () => {
     renderHeaderBar(slotHeader, {
       openOAuthDialog,
       openGeminiDialog,
+      openCatalogConfigDialog: () => openCatalogConfigDialog("spec"),
       openRulesDialog,
     });
     if (store.scriptDoc) {
@@ -79,6 +88,10 @@ export async function mountWorkbenchApp(appRoot: HTMLElement): Promise<void> {
       slotJump.innerHTML = "";
     }
     renderTaskPanel(slotRail, {
+      onRefreshCloudConfig: () => void refreshCloudConfigFromSheet(),
+      onDownloadConfigTemplate: downloadConfigTemplateXlsx,
+      onOpenSourceColsDialog: openSourceColsDialog,
+      onOpenCatalogConfigDialog: () => openCatalogConfigDialog("per-lang"),
       onLoadCloudPreview: () => void loadCloudSourceAndMatrix(),
       onImportLocalCsv: (file) => void importLocalCsvFile(file),
       onRunExtraction: () => void runMultiLanguageExtraction(),

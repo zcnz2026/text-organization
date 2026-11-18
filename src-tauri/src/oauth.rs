@@ -11,7 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use url::Url;
 
-const OAUTH_SCOPES: &str = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/documents.readonly https://www.googleapis.com/auth/userinfo.email";
+const OAUTH_SCOPES: &str = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/documents.readonly https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/userinfo.email";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -181,7 +181,7 @@ body {
   }
   ::-webkit-scrollbar-thumb {
     background: var(--scroll-thumb);
-    border-radius: 5px;
+    border-radius: 6px;
   }
   ::-webkit-scrollbar-track {
     background: var(--scroll-track);

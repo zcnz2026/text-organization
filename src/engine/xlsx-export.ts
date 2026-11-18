@@ -2,6 +2,7 @@ import type {
   LanguageRunOutput,
   ScriptSheetDocument,
 } from "../types/domain";
+import { colLetterToIndex } from "../types/schema-config";
 
 function escXml(s: string): string {
   return (s || "")
@@ -98,6 +99,7 @@ function createStoredZip(files: Array<{ name: string; data: Uint8Array }>): Uint
 export function buildMultiSheetXlsx(
   doc: ScriptSheetDocument,
   runs: LanguageRunOutput[],
+  outputHintCol = "AUTO",
 ): Uint8Array {
   const enc = new TextEncoder();
   const maxBaseCols = Math.max(
@@ -105,7 +107,12 @@ export function buildMultiSheetXlsx(
     ...doc.headerRows.map((r) => r.length),
     ...doc.rows.map((r) => r.rawCells.length),
   );
-  const hintColIdx = maxBaseCols;
+  const cleanHint = (outputHintCol || "AUTO").trim().toUpperCase();
+  const hintColIdx =
+    cleanHint && cleanHint !== "AUTO"
+      ? colLetterToIndex(cleanHint, maxBaseCols)
+      : maxBaseCols;
+  const totalCols = Math.max(maxBaseCols + 1, hintColIdx + 1);
 
   const sheetFiles: Array<{ name: string; data: Uint8Array }> = [];
   const sheetEntriesXml: string[] = [];
@@ -144,8 +151,8 @@ export function buildMultiSheetXlsx(
 
     doc.headerRows.forEach((hr, hIdx) => {
       const padded = [...hr];
-      while (padded.length < maxBaseCols) padded.push("");
-      padded.push(hIdx === doc.headerRows.length - 1 ? "【工具提示】" : "");
+      while (padded.length < totalCols) padded.push("");
+      padded[hintColIdx] = hIdx === doc.headerRows.length - 1 ? "【工具提示】" : "";
       const cells = padded
         .map(
           (val, cIdx) =>
@@ -159,10 +166,10 @@ export function buildMultiSheetXlsx(
     doc.rows.forEach((src, i) => {
       const res = run.rows[i];
       const arr = [...src.rawCells];
-      while (arr.length < maxBaseCols) arr.push("");
+      while (arr.length < totalCols) arr.push("");
       arr[doc.columnMap.targetLanguage] = res.targetLanguage;
       arr[doc.columnMap.note] = res.note;
-      arr.push(res.hint || "");
+      arr[hintColIdx] = res.hint || "";
 
       const styleFor = (cIdx: number) => {
         if (cIdx !== doc.columnMap.targetLanguage && cIdx !== hintColIdx) return 0;

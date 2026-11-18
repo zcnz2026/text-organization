@@ -3,6 +3,7 @@ import type {
   LanguageRunOutput,
   ScriptSheetDocument,
 } from "../types/domain";
+import { colLetterToIndex } from "../types/schema-config";
 
 export interface SheetTabInfo {
   sheetId: number;
@@ -79,24 +80,17 @@ export class GoogleSheetsClient {
     gidOrTitle?: number | string | null,
   ): Promise<{ sheetId: number; title: string; meta: SpreadsheetMeta }> {
     const meta = await this.getSpreadsheetMeta(spreadsheetId);
-    if (meta.sheets.length === 0) {
-      throw new Error("目标 Google 表格中没有任何工作表");
-    }
-
+    if (meta.sheets.length === 0) throw new Error("目标 Google 表格中没有任何工作表");
     if (typeof gidOrTitle === "number") {
       const found = meta.sheets.find((s) => s.sheetId === gidOrTitle);
-      if (!found) {
-        throw new Error(`未在表格中找到 gid=${gidOrTitle} 对应的子表`);
-      }
+      if (!found) throw new Error(`未在表格中找到 gid=${gidOrTitle} 对应的子表`);
       return { ...found, meta };
     }
-
     if (typeof gidOrTitle === "string" && gidOrTitle.trim()) {
       const want = gidOrTitle.trim().toLowerCase();
       const found = meta.sheets.find((s) => s.title.trim().toLowerCase() === want);
       if (found) return { ...found, meta };
     }
-
     return { ...meta.sheets[0], meta };
   }
 
@@ -109,7 +103,6 @@ export class GoogleSheetsClient {
     const fields =
       "sheets(data(rowData(values(formattedValue,hyperlink,textFormatRuns/format/link/uri,chipRuns/chip/richLinkProperties/uri))))";
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?ranges=${rangeParam}&fields=${encodeURIComponent(fields)}`;
-
     const data = await this.request<{
       sheets?: Array<{
         data?: Array<{
@@ -118,9 +111,7 @@ export class GoogleSheetsClient {
               formattedValue?: string;
               hyperlink?: string;
               textFormatRuns?: Array<{ format?: { link?: { uri?: string } } }>;
-              chipRuns?: Array<{
-                chip?: { richLinkProperties?: { uri?: string } };
-              }>;
+              chipRuns?: Array<{ chip?: { richLinkProperties?: { uri?: string } } }>;
             }>;
           }>;
         }>;
@@ -130,17 +121,14 @@ export class GoogleSheetsClient {
     const rowData = data.sheets?.[0]?.data?.[0]?.rowData ?? [];
     const grid: RichSheetGrid = rowData.map((r) =>
       (r.values ?? []).map((v) => {
-        const chipUri = v.chipRuns?.find((c) => c.chip?.richLinkProperties?.uri)
-          ?.chip?.richLinkProperties?.uri;
-        const runUri = v.textFormatRuns?.find((t) => t.format?.link?.uri)?.format
-          ?.link?.uri;
+        const chipUri = v.chipRuns?.find((c) => c.chip?.richLinkProperties?.uri)?.chip?.richLinkProperties?.uri;
+        const runUri = v.textFormatRuns?.find((t) => t.format?.link?.uri)?.format?.link?.uri;
         return {
           text: v.formattedValue ?? "",
           url: v.hyperlink || chipUri || runUri || undefined,
         };
       }),
     );
-
     return { title: target.title, grid };
   }
 
@@ -150,6 +138,7 @@ export class GoogleSheetsClient {
     doc: ScriptSheetDocument,
     run: LanguageRunOutput,
     overwrite = true,
+    outputHintCol = "AUTO",
   ): Promise<{ sheetId: number; sheetTitle: string }> {
     const meta = await this.getSpreadsheetMeta(outputSpreadsheetId);
     const maxBaseCols = Math.max(
@@ -157,8 +146,12 @@ export class GoogleSheetsClient {
       ...doc.headerRows.map((r) => r.length),
       ...doc.rows.map((r) => r.rawCells.length),
     );
-    const hintColIdx = maxBaseCols;
-    const totalCols = maxBaseCols + 1;
+    const cleanHint = (outputHintCol || "AUTO").trim().toUpperCase();
+    const hintColIdx =
+      cleanHint && cleanHint !== "AUTO"
+        ? colLetterToIndex(cleanHint, maxBaseCols)
+        : maxBaseCols;
+    const totalCols = Math.max(maxBaseCols + 1, hintColIdx + 1);
     const totalRows = doc.headerRows.length + doc.rows.length + 2;
 
     let finalTitle = sheetTitle.slice(0, 95);
@@ -234,8 +227,8 @@ export class GoogleSheetsClient {
 
     const outValues: string[][] = doc.headerRows.map((hr, idx) => {
       const padded = [...hr];
-      while (padded.length < maxBaseCols) padded.push("");
-      padded.push(idx === doc.headerRows.length - 1 ? "【工具提示】" : "");
+      while (padded.length < totalCols) padded.push("");
+      padded[hintColIdx] = idx === doc.headerRows.length - 1 ? "【工具提示】" : "";
       return padded;
     });
 
@@ -243,10 +236,10 @@ export class GoogleSheetsClient {
       const src = doc.rows[i];
       const res = run.rows[i];
       const rowArr = [...src.rawCells];
-      while (rowArr.length < maxBaseCols) rowArr.push("");
+      while (rowArr.length < totalCols) rowArr.push("");
       rowArr[doc.columnMap.targetLanguage] = res.targetLanguage;
       rowArr[doc.columnMap.note] = res.note;
-      rowArr.push(res.hint || "");
+      rowArr[hintColIdx] = res.hint || "";
       outValues.push(rowArr);
     }
 

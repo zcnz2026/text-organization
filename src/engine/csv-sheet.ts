@@ -3,6 +3,11 @@ import type {
   ScriptRow,
   ScriptSheetDocument,
 } from "../types/domain";
+import {
+  colLetterToIndex,
+  DEFAULT_SOURCE_COL_CONFIG,
+  type SourceScriptColumnConfig,
+} from "../types/schema-config";
 
 export function parseCsvToGrid(csvText: string): string[][] {
   const text = csvText.replace(/^\uFEFF/, "");
@@ -65,31 +70,68 @@ function findCol(headers: string[], patterns: RegExp[], fallback: number): numbe
 export function parseGridToScriptDocument(
   grid: string[][],
   title = "Script",
+  colConfig?: Partial<SourceScriptColumnConfig>,
 ): ScriptSheetDocument {
-  let headerIdx = 0;
-  for (let i = 0; i < Math.min(grid.length, 6); i += 1) {
-    const joined = grid[i].join("|").toLowerCase();
-    if (joined.includes("chinese") || (joined.includes("line") && joined.includes("english"))) {
-      headerIdx = i;
-      break;
-    }
-  }
-
-  const hdr = grid[headerIdx] || [];
-  const columnMap: ScriptColumnMap = {
-    line: findCol(hdr, [/^line$/i, /^行号$/], 0),
-    inTime: findCol(hdr, [/^in\s*time$/i], 1),
-    outTime: findCol(hdr, [/^out\s*time$/i], 2),
-    character: findCol(hdr, [/^character$/i, /^角色$/], 3),
-    chinese: findCol(hdr, [/^chinese$/i, /^中文/], 4),
-    english: findCol(hdr, [/^english/i, /^英文/], 5),
-    targetLanguage: findCol(hdr, [/^target\s*language$/i, /^目标语/], 6),
-    note: findCol(hdr, [/^note$/i], 7),
-    remark: findCol(hdr, [/^备注$/], 8),
-    sendRemark: findCol(hdr, [/^送翻备注$/], 9),
-    filterCategory: findCol(hdr, [/^筛选列$/], 10),
-    needExtract: findCol(hdr, [/^需要摘$/], 11),
+  const cfg: SourceScriptColumnConfig = {
+    ...DEFAULT_SOURCE_COL_CONFIG,
+    ...(colConfig ?? {}),
   };
+
+  const fb = {
+    line: colLetterToIndex(cfg.lineCol, 0),
+    inTime: colLetterToIndex(cfg.inTimeCol, 1),
+    outTime: colLetterToIndex(cfg.outTimeCol, 2),
+    character: colLetterToIndex(cfg.characterCol, 3),
+    chinese: colLetterToIndex(cfg.chineseCol, 4),
+    english: colLetterToIndex(cfg.englishCol, 5),
+    targetLanguage: colLetterToIndex(cfg.targetLangCol, 6),
+    note: colLetterToIndex(cfg.noteCol, 7),
+    remark: colLetterToIndex(cfg.remarkCol, 8),
+    sendRemark: colLetterToIndex(cfg.sendRemarkCol, 9),
+    filterCategory: colLetterToIndex(cfg.filterCol, 10),
+    needExtract: colLetterToIndex(cfg.needExtractCol, 11),
+  };
+
+  let headerIdx = 0;
+  let columnMap: ScriptColumnMap;
+
+  if (colConfig && cfg.autoDetectByHeader === false) {
+    headerIdx = Math.min(
+      Math.max(0, (cfg.headerRowNumber || 1) - 1),
+      Math.max(0, grid.length - 1),
+    );
+    columnMap = { ...fb };
+  } else {
+    headerIdx = colConfig?.headerRowNumber
+      ? Math.min(Math.max(0, cfg.headerRowNumber - 1), Math.max(0, grid.length - 1))
+      : 0;
+    for (let i = 0; i < Math.min(grid.length, 6); i += 1) {
+      const joined = grid[i].join("|").toLowerCase();
+      if (
+        joined.includes("chinese") ||
+        (joined.includes("line") && joined.includes("english"))
+      ) {
+        headerIdx = i;
+        break;
+      }
+    }
+
+    const hdr = grid[headerIdx] || [];
+    columnMap = {
+      line: findCol(hdr, [/^line$/i, /^行号$/], fb.line),
+      inTime: findCol(hdr, [/^in\s*time$/i], fb.inTime),
+      outTime: findCol(hdr, [/^out\s*time$/i], fb.outTime),
+      character: findCol(hdr, [/^character$/i, /^角色$/], fb.character),
+      chinese: findCol(hdr, [/^chinese$/i, /^中文/], fb.chinese),
+      english: findCol(hdr, [/^english/i, /^英文/], fb.english),
+      targetLanguage: findCol(hdr, [/^target\s*language$/i, /^目标语/], fb.targetLanguage),
+      note: findCol(hdr, [/^note$/i], fb.note),
+      remark: findCol(hdr, [/^备注$/], fb.remark),
+      sendRemark: findCol(hdr, [/^送翻备注$/], fb.sendRemark),
+      filterCategory: findCol(hdr, [/^筛选列$/], fb.filterCategory),
+      needExtract: findCol(hdr, [/^需要摘$/], fb.needExtract),
+    };
+  }
 
   const get = (r: string[], idx: number) =>
     idx >= 0 && idx < r.length ? (r[idx] ?? "") : "";
