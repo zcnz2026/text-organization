@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-18T19:53:00+13:00",
+  "title": "Design System: 剧本对应语系工作台",
+  "extensions": {
+    "colorMeta": {
+      "primary-teal": {
+        "role": "primary",
+        "displayName": "Deep Editorial Teal",
+        "canonical": "#0e5a6d",
+        "tonalRamp": ["#06242d", "#0a3946", "#0e5a6d", "#187991", "#339ab3", "#6bc0d4", "#b5e3ee", "#e3f1f5"]
+      },
+      "canvas-slate": {
+        "role": "neutral",
+        "displayName": "Cool Slate Canvas",
+        "canonical": "#f5f7f9",
+        "tonalRamp": ["#0f1419", "#18222c", "#2c3b4b", "#495c70", "#76899d", "#b6c5d3", "#dde5ec", "#f5f7f9"]
+      },
+      "status-matched-fg": {
+        "role": "tertiary",
+        "displayName": "Verified Match Emerald",
+        "canonical": "#0b633c",
+        "tonalRamp": ["#062919", "#084429", "#0b633c", "#128552", "#2ca971", "#6ee7b7", "#bbf7d0", "#e8f7ef"]
+      }
+    },
+    "typographyMeta": {
+      "title": { "displayName": "Masthead Title", "purpose": "应用主标题与空状态核心标题" },
+      "heading": { "displayName": "Section Heading", "purpose": "配置栏分区与模态框标题" },
+      "body": { "displayName": "Workbench Body", "purpose": "控件文案与多语种剧本对照单元格" },
+      "label": { "displayName": "Compact Meta Label", "purpose": "表头列名、状态提示与进度数字" }
+    },
+    "shadows": [
+      {
+        "name": "dialog-lift",
+        "value": "0 18px 42px rgb(0 0 0 / 0.22)",
+        "purpose": "仅用于原生顶层 <dialog> 模态窗口投影"
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out-crisp",
+        "value": "cubic-bezier(0.22, 1, 0.36, 1)",
+        "purpose": "按钮、输入框与标签状态反馈过渡（140ms-180ms）"
+      }
+    ],
+    "breakpoints": [
+      { "name": "table-card-container", "value": "640px" },
+      { "name": "workbench-stack", "value": "980px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Action Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "左侧任务栏底部唯一主执行按钮。",
+      "html": "<button class=\"ds-btn-primary\" type=\"button\">开始提取并写入 Google 表格</button>",
+      "css": ".ds-btn-primary { background: #0e5a6d; color: #ffffff; border: 1px solid #0e5a6d; border-radius: 8px; padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color 150ms cubic-bezier(0.22,1,0.36,1); } .ds-btn-primary:hover { background: #0a4655; } .ds-btn-primary:focus-visible { outline: 2px solid #0e5a6d; outline-offset: 2px; }"
+    },
+    {
+      "name": "Secondary Toolbar Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "顶栏授权、密钥池与标点规则入口按钮。",
+      "html": "<button class=\"ds-btn-sec\" type=\"button\">Google OAuth 授权</button>",
+      "css": ".ds-btn-sec { background: #ffffff; color: #101822; border: 1px solid #b6c5d3; border-radius: 8px; padding: 8px 14px; font-size: 14px; font-weight: 550; cursor: pointer; transition: background-color 150ms cubic-bezier(0.22,1,0.36,1); } .ds-btn-sec:hover { background: #eaf0f4; } .ds-btn-sec:focus-visible { outline: 2px solid #0e5a6d; outline-offset: 2px; }"
+    },
+    {
+      "name": "Resource URL Input",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "带实时 gid 识别提示的云端表格链接输入框。",
+      "html": "<input class=\"ds-input\" type=\"url\" placeholder=\"粘贴含 #gid=... 的源剧本链接\" />",
+      "css": ".ds-input { width: 100%; background: #ffffff; color: #101822; border: 1px solid #b6c5d3; border-radius: 8px; padding: 8px 11px; font-size: 14px; transition: border-color 150ms cubic-bezier(0.22,1,0.36,1); } .ds-input:hover { border-color: #0e5a6d; } .ds-input:focus-visible { outline: 2px solid #0e5a6d; outline-offset: 2px; }"
+    },
+    {
+      "name": "Filter Tab Bar",
+      "kind": "nav",
+      "refersTo": "panel-surface",
+      "description": "基于 aria-selected 与 3px 底边框的筛选标签组。",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\"><button class=\"ds-tab\" role=\"tab\" aria-selected=\"true\">待摘录行 (11)</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\">需复查 (3)</button></div>",
+      "css": ".ds-tabs { display: flex; gap: 4px; border-bottom: 1px solid #d5dfe7; } .ds-tab { position: relative; border: none; background: transparent; color: #415060; padding: 9px 13px 11px; font-size: 14px; font-weight: 550; cursor: pointer; } .ds-tab[aria-selected='true'] { color: #0e5a6d; } .ds-tab[aria-selected='true']::after { content: ''; position: absolute; inset: auto 0 0; border-bottom: 3px solid #0e5a6d; }"
+    },
+    {
+      "name": "Language Quote Selector Item",
+      "kind": "chip",
+      "refersTo": "panel-surface",
+      "description": "展示该语种双引号样式预览的目标语种多选芯片。",
+      "html": "<label class=\"ds-lang-chip\"><span><input type=\"checkbox\" checked /> 乌克兰语</span><span class=\"ds-q\">«…»</span></label>",
+      "css": ".ds-lang-chip { display: inline-flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 150px; padding: 7px 10px; border: 1px solid #0e5a6d; border-radius: 8px; background: #e3f1f5; color: #101822; font-size: 14px; cursor: pointer; } .ds-q { color: #59697a; font-size: 13px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Editorial Control Desk",
+    "overview": "剧本对应语系工作台服务于高时效、多语种并行的文稿整理与复查场景。整体视觉以克制、清晰的编辑审校台为核心：浅冷石板画布承托纯净白工作表层，避免任何装饰性渐变、悬浮徽章或卡片嵌套，让同工的视线始终聚焦在行号、中英底稿、外文切分结果与三色复查状态上。",
+    "keyCharacteristics": [
+      "单一青钴蓝主操作色统领全局主按钮、激活标签下划线与已勾选语种项。",
+      "单元格语义底色与写入 Google Sheets 的浅绿、浅琥珀、浅珊瑚红严格一致。",
+      "平面边框分层取代弥散卡片阴影，仅原生顶层 <dialog> 模态框保留定向投影。",
+      "全套统一 1.75px 描边内联矢量图标与等宽表格数字（tabular-nums）。"
+    ],
+    "rules": [
+      {
+        "name": "The Single Action Accent Rule",
+        "body": "青钴蓝仅出现在主操作按钮与激活态指示器上，绝不用于纯装饰边框或静态标签。",
+        "section": "colors"
+      },
+      {
+        "name": "The Sheet Parity Rule",
+        "body": "界面预览表中的绿、琥珀、红三种单元格底色必须与写入 Google Sheets 的复查底色保持一致。",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Timecode Rule",
+        "body": "所有行号、计数、百分比与进度数字一律启用 font-variant-numeric: tabular-nums。",
+        "section": "typography"
+      },
+      {
+        "name": "The One Elevation Signal Rule",
+        "body": "同一容器只选边框或阴影其中一种表达层级，严禁在带阴影的卡片外叠加宽晕边框。",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do 始终从 <h1> 或 <h2> 直接开始分区标题，靠字号与留白建立层级。",
+      "Do 对模态弹窗一律使用原生 <dialog> + showModal()，并配置 overscroll-behavior: contain。",
+      "Do 为所有可交互过渡显式指定属性（background-color、border-color、color），时长控制在 140ms–180ms。"
+    ],
+    "donts": [
+      "Don't 在标题上方放置任何眉标（eyebrow/kicker）或装饰性序号（01 / 02）。",
+      "Don't 使用 Emoji 充当功能图标，一律使用统一 1.75px 描边 SVG。",
+      "Don't 在面板内部再套带边框的子卡片，分组统一使用留白与 1px 分割线。"
+    ]
+  }
+}

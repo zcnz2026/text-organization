@@ -1,0 +1,27 @@
+# OAuth 2.0 凭据、API 密钥与本机运行态缓存（严禁提交）
+.local-secrets/
+*client_secret*.json
+*credentials*.json
+*service_account*.json
+oauth*.json
+token*.json
+.env
+.env.*
+!.env.example
+
+# 依赖与构建产物
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+
+# Impeccable 临时产物（保留设计契约与配置）
+.impeccable/config.local.json
+.impeccable/questions/
+.impeccable/mocks/
+.impeccable/review/
+
+# 系统与编辑器文件
+.DS_Store
+Thumbs.db
+*.log
