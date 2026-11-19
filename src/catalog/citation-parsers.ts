@@ -185,31 +185,54 @@ export function parseHymnSheet(
   let colEn = colLetterToIndex(m.hymnEnCol, 1);
   let colTarget = colLetterToIndex(m.hymnTargetCol, 2);
 
-  // Auto-detect shifted columns (e.g. A blank, B=中文, C=英文, D=印尼语) when header says so
+  // Auto-detect shifted columns (e.g. A blank, B=中文, C=英文, D=外文)
+  let detectedByHeader = false;
   for (let r = 0; r < Math.min(grid.length, 5); r += 1) {
     const row = grid[r] ?? [];
     const zhIdx = row.findIndex((c) => /^中文$|^chinese$/i.test((c?.text ?? "").trim()));
     const enIdx = row.findIndex((c) => /^英文$|^english$/i.test((c?.text ?? "").trim()));
-    if (zhIdx >= 0 && enIdx > zhIdx && (zhIdx !== colZh || enIdx !== colEn)) {
+    if (zhIdx >= 0 && enIdx > zhIdx) {
       colZh = zhIdx;
       colEn = enIdx;
       const tgIdx = row.findIndex((c, idx) => idx > enIdx && (c?.text ?? "").trim().length > 0);
       colTarget = tgIdx > enIdx ? tgIdx : enIdx + 1;
+      detectedByHeader = true;
       break;
+    }
+  }
+  if (!detectedByHeader && !cfg?.hymnZhCol && colZh === 0) {
+    let col0Hits = 0;
+    let col123Hits = 0;
+    for (let r = 0; r < Math.min(grid.length, 60); r += 1) {
+      if (txt(grid, r, 0)) col0Hits += 1;
+      if (txt(grid, r, 1) && txt(grid, r, 2) && txt(grid, r, 3)) col123Hits += 1;
+    }
+    if (col0Hits <= 1 && col123Hits >= 3) {
+      colZh = 1;
+      colEn = 2;
+      colTarget = 3;
     }
   }
 
   let current: HymnEntry | null = null;
   let inWordHymnSection = false;
   let currentIsWordHymnTitleOnly = false;
+  let expectTitleRow = false;
+  let sawBlankRow = false;
 
   for (let r = 0; r < grid.length; r += 1) {
     const c0 = txt(grid, r, colZh);
     const c1 = txt(grid, r, colEn);
     const c2 = txt(grid, r, colTarget);
-    if (!c0 && !c1 && !c2) continue;
+    if (!c0 && !c1 && !c2) {
+      sawBlankRow = true;
+      continue;
+    }
     if (r < 4 && (/^中文$|^chinese$/i.test(c0) || /^英文$|^english$/i.test(c1))) continue;
-    if (STANZA_RE.test(c0) && (!c1 || STANZA_RE.test(c1)) && (!c2 || STANZA_RE.test(c2))) continue;
+    if (STANZA_RE.test(c0) && (!c1 || STANZA_RE.test(c1)) && (!c2 || STANZA_RE.test(c2))) {
+      sawBlankRow = false;
+      continue;
+    }
 
     const isCitationRow =
       c0.includes("跟随羔羊唱新歌") ||
@@ -218,20 +241,26 @@ export function parseHymnSheet(
       c1.toLowerCase().startsWith("from ");
     if (isCitationRow) {
       if (current && c2) current.targetCitation = c2;
+      sawBlankRow = false;
       continue;
     }
 
     const isWordBanner = /^神话语?诗歌(?:标题)?[：:]/u.test(c0);
     const isChurchBanner = /^教会诗歌(?:标题)?[：:]/u.test(c0);
-    if (isWordBanner) inWordHymnSection = true;
-    if (isChurchBanner) inWordHymnSection = false;
+    if (isWordBanner) {
+      inWordHymnSection = true;
+      expectTitleRow = true;
+    }
+    if (isChurchBanner) {
+      inWordHymnSection = false;
+      expectTitleRow = true;
+    }
 
-    if (
-      isWordBanner ||
-      isChurchBanner ||
-      /^《.+》$/.test(c0) ||
-      (c0 && c1 && c2 && c0.length < 40 && !/[，。,.!?！？；;]/.test(c0))
-    ) {
+    const looksLikeBareTitle =
+      (!current || expectTitleRow || sawBlankRow || currentIsWordHymnTitleOnly) &&
+      Boolean(c0 && c1 && c2 && c0.length < 40 && !/[，。,.!?！？；;]/.test(c0));
+
+    if (isWordBanner || isChurchBanner || /^《.+》$/.test(c0) || looksLikeBareTitle) {
       const zhTitle = stripHymnBanner(c0);
       const enTitle = stripHymnBanner(c1);
       const targetTitle = stripHymnBanner(c2);
@@ -239,10 +268,13 @@ export function parseHymnSheet(
         current = { zhTitle, enTitle, targetTitle, lines: [] };
         currentIsWordHymnTitleOnly = isWordBanner || inWordHymnSection;
         hymns.push(current);
+        expectTitleRow = false;
       }
+      sawBlankRow = false;
       continue;
     }
 
+    sawBlankRow = false;
     if (current && c2 && !currentIsWordHymnTitleOnly) {
       const cleanStanza = (v: string) => v.replace(/^(?:[IVXⅠⅡⅢⅣ]+|\d+)[.、\s]+/i, "").trim();
       current.lines.push({ chinese: cleanStanza(c0), english: cleanStanza(c1), target: cleanStanza(c2) });

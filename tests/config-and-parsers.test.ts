@@ -813,4 +813,43 @@ describe("Custom SourceScriptColumnConfig remapped columns", () => {
     expect(entries[0].targetBracketCite).toContain("(Firman");
     expect(entries[0].targetSubtitleBandCite).toContain("Dikutip dari Firman");
   });
+
+  it("does not split Ukrainian church hymn at unpunctuated lyric line like 每天吃喝神话 and aggregates multi-sublines accurately", () => {
+    const ukHymnGrid = toRichGrid([
+      ["", "尼日利亚报道", "", ""],
+      ["", "教会诗歌：", "", ""],
+      ["", "《神的话语都是真理》", "All God's Words Are the Truth", "Усі Божі слова є істиною"],
+      ["", "I", "1", ""],
+      ["", "神来在人间与人同生活，发表了许多真理，", "God has come to earth to live with man, expressing many truths.", "Бог прийшов на землю жити з людиною, висловлюючи багато істин."],
+      ["", "从此我不再渺茫中寻觅，", "No longer do I search in uncertainty,", "Я більше не шукаю в невизначеності,"],
+      ["", "因有神话带领我，", "for I have God's words to guide me.", "бо мене спрямовують Божі слова."],
+      ["", "每天吃喝神话", "Each day, I eat and drink God's words", "Щодня я їм і п'ю Божі слова"],
+      ["", "活在神前，", "and live before God;", "та живу перед Богом;"],
+      ["", "有圣灵开启光照，", "the Holy Spirit enlightens and illuminates me.", "Святий Дух просвіщає й осяює мене."],
+      ["", "我明白真理越来越透亮，", "I understand the truth ever more clearly,", "Я розумію істину дедалі ясніше,"],
+      ["", "生命天天有长进。", "and my life progresses every day.", "і моє життя щодня прогресує."],
+      ["", "神话道尽人类败坏实情，", "God's words lay bare the facts of man's corruption,", "Божі слова оголюють факти людської розбещеності,"],
+      ["", "使人都心服口服，", "leaving everyone utterly convinced.", "залишаючи всіх цілковито переконаними."],
+    ]);
+
+    const hymns = parseHymnSheet(ukHymnGrid);
+    expect(hymns).toHaveLength(1);
+    expect(hymns[0].lines).toHaveLength(10);
+
+    const scriptRows = [
+      makeScriptRow({ rowIndex: 0, chinese: "“神来在人间与人同生活，发表了许多真理，", english: "\"God has come to earth to live with man, expressing many truths." }),
+      makeScriptRow({ rowIndex: 1, chinese: "从此我不再渺茫中寻觅，因有神话带领我，", english: "No longer do I search in uncertainty, for I have God's words to guide me." }),
+      makeScriptRow({ rowIndex: 2, chinese: "每天吃喝神话活在神前，有圣灵开启光照，", english: "Each day, I eat and drink God's words and live before God; the Holy Spirit enlightens and illuminates me." }),
+      makeScriptRow({ rowIndex: 3, chinese: "我明白真理越来越透亮，生命天天有长进。", english: "I understand the truth ever more clearly, and my life progresses every day." }),
+      makeScriptRow({ rowIndex: 4, chinese: "神话道尽人类败坏实情，使人都心服口服，", english: "God's words lay bare the facts of man's corruption, leaving everyone utterly convinced." }),
+    ];
+
+    const agg = aggregateHymnSublinesForBlock(hymns[0].lines, scriptRows);
+    expect(agg).not.toBeNull();
+    expect(agg![0]).toBe("Бог прийшов на землю жити з людиною, висловлюючи багато істин.");
+    expect(agg![1]).toBe("Я більше не шукаю в невизначеності, бо мене спрямовують Божі слова.");
+    expect(agg![2]).toBe("Щодня я їм і п'ю Божі слова та живу перед Богом; Святий Дух просвіщає й осяює мене.");
+    expect(agg![3]).toBe("Я розумію істину дедалі ясніше, і моє життя щодня прогресує.");
+    expect(agg![4]).toBe("Божі слова оголюють факти людської розбещеності, залишаючи всіх цілковито переконаними.");
+  });
 });
