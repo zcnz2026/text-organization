@@ -26,6 +26,10 @@ const AI_SETTINGS_KEY = "script_lang_ai_config_v1";
 const SCHEMA_STORAGE_KEY = "script_lang_schema_config_v1";
 
 export type RowFilterMode = "all" | "extractable" | "matched" | "review";
+export type TableWrapMode = "nowrap" | "wrap";
+export type TableFontSize = "sm" | "md" | "lg";
+
+export const DEFAULT_TABLE_COL_WIDTHS = [58, 92, 130, 220, 240, 260, 160, 260];
 
 export interface AppState {
   settings: WorkbenchSettings;
@@ -48,6 +52,9 @@ export interface AppState {
   runsByLang: Map<string, LanguageRunOutput>;
   activePreviewLang: string;
   rowFilter: RowFilterMode;
+  tableWrapMode: TableWrapMode;
+  tableFontSize: TableFontSize;
+  tableColWidths: number[];
   searchQuery: string;
   busy: boolean;
   progressPercent: number;
@@ -192,6 +199,9 @@ export const store: AppState = {
   runsByLang: new Map(),
   activePreviewLang: "",
   rowFilter: "extractable",
+  tableWrapMode: "nowrap",
+  tableFontSize: "sm",
+  tableColWidths: [...DEFAULT_TABLE_COL_WIDTHS],
   searchQuery: "",
   busy: false,
   progressPercent: 0,

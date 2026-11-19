@@ -2,7 +2,12 @@ import { classifyScriptTasks } from "../engine/classifier";
 import { diagLog } from "../platform/diag-log";
 import type { ProcessedRowResult } from "../types/domain";
 import { icons } from "./icons";
-import { notifyStateChanged, type RowFilterMode, store } from "./state";
+import {
+  notifyStateChanged,
+  type RowFilterMode,
+  store,
+  type TableFontSize,
+} from "./state";
 
 function esc(s: string): string {
   return (s || "")
@@ -179,20 +184,30 @@ export function renderPreviewStage(
               ? `<span class="status-text-matched">${esc(res.hint || "已精准提取")}</span>`
               : `<span class="field-hint">${esc(r.filterCategory || "常规台词")}</span>`;
 
+      const plainHint =
+        res.status === "missing"
+          ? res.hint || "未找到"
+          : res.status === "warning"
+            ? res.hint || "请核对"
+            : res.status === "matched"
+              ? res.hint || "已精准提取"
+              : r.filterCategory || "常规台词";
+      const timeText = formatTimeRange(r.inTime, r.outTime);
+
       return `
         <tr>
-          <th scope="row">${esc(r.line || `#${r.rowIndex + 1}`)}</th>
-          <td data-col="时间轴" class="cell-timecode cell-pre">${esc(formatTimeRange(r.inTime, r.outTime))}</td>
-          <td data-col="角色/类型">${esc(r.character)}</td>
-          <td data-col="中文原稿" class="cell-pre">${esc(r.chinese)}</td>
-          <td data-col="English 底稿" class="cell-pre col-source-end">${esc(r.english)}</td>
-          <td data-col="目标语种译文" class="cell-pre ${cellCls}">
+          <th scope="row" title="${esc(r.line || `#${r.rowIndex + 1}`)}">${esc(r.line || `#${r.rowIndex + 1}`)}</th>
+          <td data-col="时间轴" class="cell-timecode" title="${esc(timeText)}">${esc(store.tableWrapMode === "nowrap" ? timeText.replace(/\n/g, " ~ ") : timeText)}</td>
+          <td data-col="角色/类型" title="${esc(r.character)}">${esc(r.character)}</td>
+          <td data-col="中文原稿" title="${esc(r.chinese)}">${esc(r.chinese)}</td>
+          <td data-col="English 底稿" class="col-source-end" title="${esc(r.english)}">${esc(r.english)}</td>
+          <td data-col="目标语种译文" class="${cellCls}" title="${esc(res.targetLanguage)}">
             <div class="editable-cell" contenteditable="${Boolean(activeRun)}" data-edit-row="${r.rowIndex}" data-edit-field="targetLanguage" spellcheck="false">${esc(res.targetLanguage)}</div>
           </td>
-          <td data-col="Note" class="cell-pre">
+          <td data-col="Note" title="${esc(res.note)}">
             <div class="editable-cell" contenteditable="${Boolean(activeRun)}" data-edit-row="${r.rowIndex}" data-edit-field="note" spellcheck="false">${esc(res.note)}</div>
           </td>
-          <td data-col="工具提示" class="${cellCls}">${statusLabel}</td>
+          <td data-col="工具提示" class="${cellCls}" title="${esc(plainHint)}">${statusLabel}</td>
         </tr>
       `;
     })
@@ -216,27 +231,48 @@ export function renderPreviewStage(
       <div id="script-tabpanel" role="tabpanel" aria-label="剧本对照检视内容">
         <div class="inspector-toolbar">
           <span class="field-hint">
-            当前剧本：${esc(doc.title)}${store.isDemoData ? " · 合成演示样本（可直接加载真实表格替换）" : ""} · 显示 ${visibleRows.length} 行${activeRun ? "（点击目标语种单元格可直接微调，完成后点左侧「写回审校结果」）" : ""}
+            当前剧本：${esc(doc.title)}${store.isDemoData ? " · 合成演示" : ""} · 显示 ${visibleRows.length} 行（表头右边缘可拖动调宽）
           </span>
-          <div style="display:flex;align-items:center;gap:0.45rem;min-inline-size:0;flex:1 1 200px;max-inline-size:320px">
-            ${icons.search}
-            <input id="inp-table-search" type="search" class="text-input" placeholder="搜索行号、原文、篇目或提示..." value="${esc(store.searchQuery)}" />
+          <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+            <div class="segmented" role="group" aria-label="行显示方式">
+              <button type="button" class="seg-option" data-wrap-mode="nowrap" aria-pressed="${store.tableWrapMode === "nowrap"}">单行紧凑</button>
+              <button type="button" class="seg-option" data-wrap-mode="wrap" aria-pressed="${store.tableWrapMode === "wrap"}">自动换行</button>
+            </div>
+            <div class="segmented" role="group" aria-label="表格字号">
+              <button type="button" class="seg-option" data-font-size="sm" aria-pressed="${store.tableFontSize === "sm"}">小字</button>
+              <button type="button" class="seg-option" data-font-size="md" aria-pressed="${store.tableFontSize === "md"}">中字</button>
+              <button type="button" class="seg-option" data-font-size="lg" aria-pressed="${store.tableFontSize === "lg"}">大字</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:0.4rem;min-inline-size:180px;max-inline-size:260px">
+              ${icons.search}
+              <input id="inp-table-search" type="search" class="text-input" placeholder="搜索行号、原文或提示..." value="${esc(store.searchQuery)}" />
+            </div>
           </div>
         </div>
 
         <div tabindex="0" role="region" aria-labelledby="script-table-caption" class="table-wrapper">
-          <table class="script-table">
+          <table class="script-table ${store.tableWrapMode === "nowrap" ? "is-nowrap" : "is-wrap"} font-${store.tableFontSize}">
             <caption id="script-table-caption">${esc(doc.title)} 摘录对照检视表</caption>
+            <colgroup>
+              ${store.tableColWidths.map((w, idx) => `<col data-col-idx="${idx}" style="inline-size:${w}px" />`).join("")}
+            </colgroup>
             <thead>
               <tr>
-                <th>行号</th>
-                <th style="inline-size:84px">时间轴</th>
-                <th style="min-inline-size:126px">角色/类型</th>
-                <th style="inline-size:20%">中文原稿</th>
-                <th style="inline-size:20%" class="col-source-end">English 底稿</th>
-                <th style="inline-size:23%">${esc(activeLang ? `${activeLang}（摘录结果）` : "Target Language")}</th>
-                <th style="inline-size:14%">Note（提前贴上）</th>
-                <th style="inline-size:145px">【工具提示】</th>
+                ${[
+                  "行号",
+                  "时间轴",
+                  "角色/类型",
+                  "中文原稿",
+                  "English 底稿",
+                  activeLang ? `${activeLang}（摘录结果）` : "Target Language",
+                  "Note（提前贴上）",
+                  "【工具提示】",
+                ]
+                  .map(
+                    (label, idx) =>
+                      `<th${idx === 4 ? ' class="col-source-end"' : ""}><span>${esc(label)}</span><span class="col-resizer" data-resize-col="${idx}" title="按住左右拖动调整列宽"></span></th>`,
+                  )
+                  .join("")}
               </tr>
             </thead>
             <tbody>
@@ -286,6 +322,43 @@ export function renderPreviewStage(
       nextSearch.focus();
       nextSearch.setSelectionRange(nextSearch.value.length, nextSearch.value.length);
     }
+  });
+
+  container.querySelectorAll<HTMLButtonElement>("[data-wrap-mode]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      store.tableWrapMode = btn.dataset.wrapMode === "wrap" ? "wrap" : "nowrap";
+      notifyStateChanged();
+    });
+  });
+
+  container.querySelectorAll<HTMLButtonElement>("[data-font-size]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      store.tableFontSize = (btn.dataset.fontSize as TableFontSize) || "sm";
+      notifyStateChanged();
+    });
+  });
+
+  container.querySelectorAll<HTMLElement>("[data-resize-col]").forEach((handle) => {
+    handle.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      const idx = Number(handle.dataset.resizeCol);
+      const startX = e.clientX;
+      const startW = store.tableColWidths[idx] ?? 160;
+      const colEl = container.querySelector<HTMLElement>(`col[data-col-idx="${idx}"]`);
+      handle.classList.add("is-dragging");
+      const onMove = (ev: PointerEvent) => {
+        const nextW = Math.max(48, Math.min(720, Math.round(startW + (ev.clientX - startX))));
+        store.tableColWidths[idx] = nextW;
+        if (colEl) colEl.style.inlineSize = `${nextW}px`;
+      };
+      const onUp = () => {
+        handle.classList.remove("is-dragging");
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    });
   });
 
   if (activeRun) {
