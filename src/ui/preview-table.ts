@@ -2,12 +2,19 @@ import { classifyScriptTasks } from "../engine/classifier";
 import { diagLog } from "../platform/diag-log";
 import type { ProcessedRowResult } from "../types/domain";
 import { icons } from "./icons";
+import { openMissingLogDialog } from "./missing-log-dialog";
 import {
+  DEFAULT_TABLE_COL_WIDTHS,
   notifyStateChanged,
   type RowFilterMode,
+  saveTableColWidths,
   store,
   type TableFontSize,
 } from "./state";
+
+function cleanCellText(s: string): string {
+  return (s || "").replace(/\r\n?/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
 
 function esc(s: string): string {
   return (s || "")
@@ -114,14 +121,13 @@ export function renderPreviewStage(
     if (store.rowFilter === "extractable" && !extractableRowSet.has(r.rowIndex)) {
       return false;
     }
+    if (store.rowFilter === "missing" && res?.status !== "missing") {
+      return false;
+    }
     if (store.rowFilter === "matched" && res?.status !== "matched") {
       return false;
     }
-    if (
-      store.rowFilter === "review" &&
-      res?.status !== "warning" &&
-      res?.status !== "missing"
-    ) {
+    if (store.rowFilter === "review" && res?.status !== "warning") {
       return false;
     }
     if (query) {
@@ -132,7 +138,8 @@ export function renderPreviewStage(
   });
 
   const matchedTotal = activeRun?.matchedCount ?? 0;
-  const reviewTotal = (activeRun?.warningCount ?? 0) + (activeRun?.missingCount ?? 0);
+  const missingTotal = activeRun?.missingCount ?? 0;
+  const warningTotal = activeRun?.warningCount ?? 0;
 
   const langTabsHtml =
     runLangs.length > 0
@@ -141,8 +148,7 @@ export function renderPreviewStage(
           ${runLangs
             .map((lang, idx) => {
               const r = store.runsByLang.get(lang)!;
-              const warnSum = r.warningCount + r.missingCount;
-              const suffix = warnSum > 0 ? ` · ${warnSum}待核` : ` · ${r.matchedCount}`;
+              const suffix = r.missingCount > 0 ? ` · ${r.missingCount}未找到` : ` · ${r.matchedCount}`;
               return `<button type="button" id="lang-tab-${idx}" role="tab" class="tab-btn" data-lang-tab="${esc(lang)}" aria-selected="${lang === activeLang}">${esc(lang)}${esc(suffix)}</button>`;
             })
             .join("")}
@@ -152,9 +158,10 @@ export function renderPreviewStage(
 
   const filterTabs: Array<{ id: RowFilterMode; label: string }> = [
     { id: "extractable", label: `待摘录行 (${extractableRowSet.size})` },
-    { id: "all", label: `全部行 (${doc.rows.length})` },
+    { id: "missing", label: `未找到 (${missingTotal})` },
+    { id: "review", label: `需核对 (${warningTotal})` },
     { id: "matched", label: `已匹配 (${matchedTotal})` },
-    { id: "review", label: `需复查 (${reviewTotal})` },
+    { id: "all", label: `全部行 (${doc.rows.length})` },
   ];
 
   const rowsHtml = visibleRows
@@ -194,20 +201,25 @@ export function renderPreviewStage(
               : r.filterCategory || "常规台词";
       const timeText = formatTimeRange(r.inTime, r.outTime);
 
+      const zhText = cleanCellText(r.chinese);
+      const enText = cleanCellText(r.english);
+      const tgText = cleanCellText(res.targetLanguage);
+      const noteText = cleanCellText(res.note);
+
       return `
         <tr>
           <th scope="row" title="${esc(r.line || `#${r.rowIndex + 1}`)}">${esc(r.line || `#${r.rowIndex + 1}`)}</th>
-          <td data-col="时间轴" class="cell-timecode" title="${esc(timeText)}">${esc(store.tableWrapMode === "nowrap" ? timeText.replace(/\n/g, " ~ ") : timeText)}</td>
-          <td data-col="角色/类型" title="${esc(r.character)}">${esc(r.character)}</td>
-          <td data-col="中文原稿" title="${esc(r.chinese)}">${esc(r.chinese)}</td>
-          <td data-col="English 底稿" class="col-source-end" title="${esc(r.english)}">${esc(r.english)}</td>
-          <td data-col="目标语种译文" class="${cellCls}" title="${esc(res.targetLanguage)}">
-            <div class="editable-cell" contenteditable="${Boolean(activeRun)}" data-edit-row="${r.rowIndex}" data-edit-field="targetLanguage" spellcheck="false">${esc(res.targetLanguage)}</div>
+          <td data-col="时间轴" class="cell-timecode" title="${esc(timeText)}"><div class="cell-clip">${esc(store.tableWrapMode === "nowrap" ? timeText.replace(/\n/g, " ~ ") : timeText)}</div></td>
+          <td data-col="角色/类型" title="${esc(r.character)}"><div class="cell-clip">${esc(cleanCellText(r.character))}</div></td>
+          <td data-col="中文原稿" title="${esc(zhText)}"><div class="cell-clip">${esc(zhText)}</div></td>
+          <td data-col="English 底稿" class="col-source-end" title="${esc(enText)}"><div class="cell-clip">${esc(enText)}</div></td>
+          <td data-col="目标语种译文" class="${cellCls}" title="${esc(tgText)}">
+            <div class="editable-cell cell-clip" contenteditable="${Boolean(activeRun)}" data-edit-row="${r.rowIndex}" data-edit-field="targetLanguage" spellcheck="false">${esc(tgText)}</div>
           </td>
-          <td data-col="Note" title="${esc(res.note)}">
-            <div class="editable-cell" contenteditable="${Boolean(activeRun)}" data-edit-row="${r.rowIndex}" data-edit-field="note" spellcheck="false">${esc(res.note)}</div>
+          <td data-col="Note" title="${esc(noteText)}">
+            <div class="editable-cell cell-clip" contenteditable="${Boolean(activeRun)}" data-edit-row="${r.rowIndex}" data-edit-field="note" spellcheck="false">${esc(noteText)}</div>
           </td>
-          <td data-col="工具提示" class="${cellCls}" title="${esc(plainHint)}">${statusLabel}</td>
+          <td data-col="工具提示" class="${cellCls}" title="${esc(plainHint)}"><div class="cell-clip">${statusLabel}</div></td>
         </tr>
       `;
     })
@@ -231,19 +243,21 @@ export function renderPreviewStage(
       <div id="script-tabpanel" role="tabpanel" aria-label="剧本对照检视内容">
         <div class="inspector-toolbar">
           <span class="field-hint">
-            当前剧本：${esc(doc.title)}${store.isDemoData ? " · 合成演示" : ""} · 显示 ${visibleRows.length} 行（表头右边缘可拖动调宽）
+            ${esc(doc.title)} · 显示 ${visibleRows.length} 行（表头右边缘拖动调宽）
           </span>
-          <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap">
+            <button type="button" id="btn-open-missing-log" class="btn btn-compact" title="查看所有未找到与需核对的详细原因日志">缺失日志 (${missingTotal})</button>
+            <button type="button" id="btn-reset-col-widths" class="btn btn-compact" title="恢复紧凑默认列宽">重置列宽</button>
             <div class="segmented" role="group" aria-label="行显示方式">
-              <button type="button" class="seg-option" data-wrap-mode="nowrap" aria-pressed="${store.tableWrapMode === "nowrap"}">单行紧凑</button>
-              <button type="button" class="seg-option" data-wrap-mode="wrap" aria-pressed="${store.tableWrapMode === "wrap"}">自动换行</button>
+              <button type="button" class="seg-option" data-wrap-mode="wrap" aria-pressed="${store.tableWrapMode === "wrap"}">智能换行</button>
+              <button type="button" class="seg-option" data-wrap-mode="nowrap" aria-pressed="${store.tableWrapMode === "nowrap"}">单行截断</button>
             </div>
             <div class="segmented" role="group" aria-label="表格字号">
-              <button type="button" class="seg-option" data-font-size="sm" aria-pressed="${store.tableFontSize === "sm"}">小字</button>
-              <button type="button" class="seg-option" data-font-size="md" aria-pressed="${store.tableFontSize === "md"}">中字</button>
-              <button type="button" class="seg-option" data-font-size="lg" aria-pressed="${store.tableFontSize === "lg"}">大字</button>
+              <button type="button" class="seg-option" data-font-size="sm" aria-pressed="${store.tableFontSize === "sm"}">小</button>
+              <button type="button" class="seg-option" data-font-size="md" aria-pressed="${store.tableFontSize === "md"}">中</button>
+              <button type="button" class="seg-option" data-font-size="lg" aria-pressed="${store.tableFontSize === "lg"}">大</button>
             </div>
-            <div style="display:flex;align-items:center;gap:0.4rem;min-inline-size:180px;max-inline-size:260px">
+            <div style="display:flex;align-items:center;gap:0.35rem;min-inline-size:155px;max-inline-size:210px">
               ${icons.search}
               <input id="inp-table-search" type="search" class="text-input" placeholder="搜索行号、原文或提示..." value="${esc(store.searchQuery)}" />
             </div>
@@ -251,7 +265,7 @@ export function renderPreviewStage(
         </div>
 
         <div tabindex="0" role="region" aria-labelledby="script-table-caption" class="table-wrapper">
-          <table class="script-table ${store.tableWrapMode === "nowrap" ? "is-nowrap" : "is-wrap"} font-${store.tableFontSize}">
+          <table class="script-table ${store.tableWrapMode === "nowrap" ? "is-nowrap" : "is-wrap"} font-${store.tableFontSize}" style="inline-size:${store.tableColWidths.reduce((a, b) => a + b, 0)}px">
             <caption id="script-table-caption">${esc(doc.title)} 摘录对照检视表</caption>
             <colgroup>
               ${store.tableColWidths.map((w, idx) => `<col data-col-idx="${idx}" style="inline-size:${w}px" />`).join("")}
@@ -338,21 +352,35 @@ export function renderPreviewStage(
     });
   });
 
+  container.querySelector("#btn-open-missing-log")?.addEventListener("click", () => {
+    openMissingLogDialog(doc, activeLang, activeRun);
+  });
+
+  container.querySelector("#btn-reset-col-widths")?.addEventListener("click", () => {
+    store.tableColWidths = [...DEFAULT_TABLE_COL_WIDTHS];
+    saveTableColWidths();
+    notifyStateChanged();
+  });
+
   container.querySelectorAll<HTMLElement>("[data-resize-col]").forEach((handle) => {
     handle.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       const idx = Number(handle.dataset.resizeCol);
       const startX = e.clientX;
-      const startW = store.tableColWidths[idx] ?? 160;
+      const startW = store.tableColWidths[idx] ?? 150;
       const colEl = container.querySelector<HTMLElement>(`col[data-col-idx="${idx}"]`);
+      const tableEl = container.querySelector<HTMLElement>(".script-table");
       handle.classList.add("is-dragging");
+      const minW = idx === 0 ? 36 : 56;
       const onMove = (ev: PointerEvent) => {
-        const nextW = Math.max(48, Math.min(720, Math.round(startW + (ev.clientX - startX))));
+        const nextW = Math.max(minW, Math.min(680, Math.round(startW + (ev.clientX - startX))));
         store.tableColWidths[idx] = nextW;
         if (colEl) colEl.style.inlineSize = `${nextW}px`;
+        if (tableEl) tableEl.style.inlineSize = `${store.tableColWidths.reduce((a, b) => a + b, 0)}px`;
       };
       const onUp = () => {
         handle.classList.remove("is-dragging");
+        saveTableColWidths();
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
       };

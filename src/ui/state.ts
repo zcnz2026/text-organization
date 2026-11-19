@@ -25,11 +25,36 @@ const CUSTOM_RULES_KEY = "script_lang_custom_rules_v1";
 const AI_SETTINGS_KEY = "script_lang_ai_config_v1";
 const SCHEMA_STORAGE_KEY = "script_lang_schema_config_v1";
 
-export type RowFilterMode = "all" | "extractable" | "matched" | "review";
+export type RowFilterMode = "all" | "extractable" | "missing" | "matched" | "review";
 export type TableWrapMode = "nowrap" | "wrap";
 export type TableFontSize = "sm" | "md" | "lg";
 
-export const DEFAULT_TABLE_COL_WIDTHS = [58, 92, 130, 220, 240, 260, 160, 260];
+export const DEFAULT_TABLE_COL_WIDTHS = [44, 78, 96, 175, 185, 210, 140, 175];
+
+const COL_WIDTHS_STORAGE_KEY = "script_lang_col_widths_v2";
+
+function loadSavedColWidths(): number[] {
+  try {
+    const raw = localStorage.getItem(COL_WIDTHS_STORAGE_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw) as unknown;
+      if (Array.isArray(arr) && arr.length === DEFAULT_TABLE_COL_WIDTHS.length && arr.every((n) => typeof n === "number" && n >= 36)) {
+        return arr;
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return [...DEFAULT_TABLE_COL_WIDTHS];
+}
+
+export function saveTableColWidths(): void {
+  try {
+    localStorage.setItem(COL_WIDTHS_STORAGE_KEY, JSON.stringify(store.tableColWidths));
+  } catch {
+    // ignore
+  }
+}
 
 export interface AppState {
   settings: WorkbenchSettings;
@@ -199,9 +224,9 @@ export const store: AppState = {
   runsByLang: new Map(),
   activePreviewLang: "",
   rowFilter: "extractable",
-  tableWrapMode: "nowrap",
+  tableWrapMode: "wrap",
   tableFontSize: "sm",
-  tableColWidths: [...DEFAULT_TABLE_COL_WIDTHS],
+  tableColWidths: loadSavedColWidths(),
   searchQuery: "",
   busy: false,
   progressPercent: 0,

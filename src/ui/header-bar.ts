@@ -27,6 +27,7 @@ export function renderHeaderBar(
   container.innerHTML = `
     <header class="topbar">
       <div class="brand-group">
+        <img src="/app-icon.svg" alt="" class="brand-logo" width="24" height="24" />
         <h1 class="brand-title">剧本对应语系工作台</h1>
         <a
           href="https://github.com/zcnz2026/text-organization"
@@ -34,7 +35,7 @@ export function renderHeaderBar(
           rel="noopener noreferrer"
           class="version-link"
           title="打开 GitHub 仓库与版本发布记录"
-        >v0.2.0 · 版本库</a>
+        >v0.2.3 · 版本库</a>
       </div>
       <div class="topbar-actions">
         <button type="button" id="btn-open-oauth" class="btn ${oauthConnected ? "btn-connected" : ""}">

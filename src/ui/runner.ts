@@ -177,7 +177,6 @@ export async function runMultiLanguageExtraction(): Promise<void> {
   if (!store.scriptDoc) return setErr("请先读取云端源剧本或导入本地 CSV 源稿。");
   const targetLangs = store.settings.selectedLanguages;
   if (targetLangs.length === 0) return setErr("请至少勾选一个目标输出语种。");
-  const outParsed = store.settings.outputSpreadsheetUrl.trim() ? parseGoogleResourceUrl(store.settings.outputSpreadsheetUrl, "sheet") : null;
   startBusy(5, "正在初始化云端资料库加载器...");
   try {
     const { sheets, docs } = createCloudClients();
@@ -187,7 +186,9 @@ export async function runMultiLanguageExtraction(): Promise<void> {
       const keys = await hostBridge.getPlainGeminiKeys();
       if (keys.length > 0) gemini = new GeminiPoolClient({ apiKeys: keys, model: store.geminiModel, rotation: store.geminiRotation });
     }
-    let writtenSheets = 0;
+    let totalMatched = 0;
+    let totalMissing = 0;
+    let totalWarning = 0;
     for (let i = 0; i < targetLangs.length; i += 1) {
       const lang = targetLangs[i];
       const basePct = (i / targetLangs.length) * 100;
@@ -211,22 +212,37 @@ export async function runMultiLanguageExtraction(): Promise<void> {
         gemini,
         loadArticleDoc: (docUrl) => loader.loadArticleManuscript(docUrl, { zhCol1Based: langCols.manuscriptZhColIndex, enCol1Based: langCols.manuscriptEnColIndex, targetCol1Based: langCols.manuscriptTargetColIndex }),
         onProgress: (done, total, hint) => {
-          store.progressPercent = basePct + spanPct * (0.15 + 0.65 * (done / Math.max(1, total)));
+          store.progressPercent = basePct + spanPct * (0.15 + 0.8 * (done / Math.max(1, total)));
           store.progressText = `[${lang}] 正在匹配 (${done}/${total}) ${hint.slice(0, 18)}`;
           notifyStateChanged();
         },
       });
       store.runsByLang.set(lang, runOut);
       store.activePreviewLang = lang;
-      if (outParsed?.kind === "sheet") {
-        store.progressPercent = basePct + spanPct * 0.88;
-        store.progressText = `[${lang}] 正在写入输出 Google 表格 Sheet...`;
-        notifyStateChanged();
-        await sheets.writeLanguageSheet(outParsed.id, lang, store.scriptDoc, runOut, store.settings.overwriteExistingSheets, store.sourceColConfig.outputHintCol);
-        writtenSheets += 1;
+      totalMatched += runOut.matchedCount;
+      totalMissing += runOut.missingCount;
+      totalWarning += runOut.warningCount;
+
+      const missingLines = runOut.rows.filter((r) => r.status === "missing");
+      if (missingLines.length > 0) {
+        const summary = missingLines
+          .slice(0, 30)
+          .map((m) => {
+            const src = store.scriptDoc?.rows[m.rowIndex];
+            const lineNo = src?.line || `#${m.rowIndex + 1}`;
+            const zh = (src?.chinese || src?.english || "").replace(/\s+/g, " ").slice(0, 26);
+            return `行${lineNo}「${zh}」=> ${m.hint || "未找到"}`;
+          })
+          .join(" ; ");
+        diagLog.warn("未找到汇总", `[${lang}] 共 ${missingLines.length} 行未找到`, summary);
+      } else {
+        diagLog.info("提取完成", `[${lang}] 匹配 ${runOut.matchedCount} 行，未找到 0 行，需核对 ${runOut.warningCount} 行`);
       }
     }
-    store.notice = { type: "info", message: writtenSheets > 0 ? `已完成 ${targetLangs.length} 个语种摘录，并成功写入专用输出 Google 表格（共 ${writtenSheets} 个独立 Sheet）。` : `已完成 ${targetLangs.length} 个语种摘录预览（未填写输出 Google 表格链接，可核对后写入或导出 Excel）。` };
+    store.notice = {
+      type: "info",
+      message: `已完成 ${targetLangs.length} 个语种提取预览（匹配 ${totalMatched} 行 / 未找到 ${totalMissing} 行 / 需核对 ${totalWarning} 行）。请先在右侧核对与筛选，确认无误后再点左侧「确认写入 Google 表格」。`,
+    };
     finishBusy();
   } catch (err) { finishBusy(err); }
 }

@@ -129,11 +129,11 @@ export function renderTaskPanel(
             ? `<div class="progress-strip" role="status" aria-live="polite"><div class="field-label-row"><span class="field-label">${esc(store.progressText || "正在执行摘录...")}</span><span class="field-hint">${Math.round(store.progressPercent)}%</span></div><div class="progress-bar-track"><div class="progress-bar-fill" style="width:${Math.max(4, Math.min(100, store.progressPercent))}%"></div></div></div>`
             : ""
         }
-        <button type="button" id="btn-run-pipeline" class="btn btn-primary btn-block" ${store.busy || s.selectedLanguages.length === 0 ? "disabled" : ""}>${icons.play}<span>开始提取并写入 Google 表格</span></button>
+        <button type="button" id="btn-run-pipeline" class="btn btn-primary btn-block" ${store.busy || s.selectedLanguages.length === 0 ? "disabled" : ""}>${icons.play}<span>开始提取并预览（不写入表格）</span></button>
         <div class="btn-row-equal">
           ${
             hasReviewedRuns
-              ? `<button type="button" id="btn-sync-reviewed" class="btn btn-compact" ${store.busy || !s.outputSpreadsheetUrl.trim() ? "disabled" : ""} title="不重跑提取，直接把右侧微调后的结果写回输出 Google 表格">${icons.cloudSync}<span>写回审校结果</span></button>`
+              ? `<button type="button" id="btn-sync-reviewed" class="btn btn-compact btn-connected" ${store.busy || !s.outputSpreadsheetUrl.trim() ? "disabled" : ""} title="确认右侧预览结果无误后，正式写入专用输出 Google 表格">${icons.cloudSync}<span>确认写入 Google 表格</span></button>`
               : ""
           }
           <button type="button" id="btn-export-xlsx" class="btn btn-compact" ${store.busy || !store.scriptDoc ? "disabled" : ""}>${icons.download}<span>导出 Excel (.xlsx)</span></button>

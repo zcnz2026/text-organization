@@ -21,9 +21,17 @@
 
 .brand-group {
   display: flex;
-  align-items: baseline;
-  gap: 0.65rem;
+  align-items: center;
+  gap: 0.55rem;
   min-inline-size: 0;
+}
+
+.brand-logo {
+  display: block;
+  inline-size: 24px;
+  block-size: 24px;
+  border-radius: 6px;
+  flex-shrink: 0;
 }
 
 .brand-title {
@@ -224,13 +232,11 @@
 }
 
 .script-table {
-  inline-size: max-content;
-  min-inline-size: 100%;
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
   font-size: var(--text-xs);
-  line-height: 1.4;
+  line-height: 1.38;
 }
 
 .script-table.font-sm {
@@ -280,7 +286,7 @@
   position: absolute;
   inset-block: 0;
   inset-inline-end: 0;
-  inline-size: 6px;
+  inline-size: 8px;
   cursor: col-resize;
   z-index: 4;
 }
@@ -292,17 +298,25 @@
 
 .script-table tbody th,
 .script-table tbody td {
-  padding: 0.35rem 0.55rem;
+  padding: 0.28rem 0.48rem;
   border-block-end: 1px solid var(--border-subtle);
   border-inline-end: 1px solid var(--border-subtle);
   vertical-align: top;
 }
 
-.script-table.is-nowrap tbody td {
+.cell-clip {
+  max-block-size: 5.6em;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+}
+
+.script-table.is-nowrap tbody td,
+.script-table.is-nowrap tbody td .cell-clip {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  vertical-align: middle;
+  max-block-size: 1.6em;
 }
 
 .script-table.is-nowrap tbody td .editable-cell {
@@ -312,10 +326,11 @@
   min-block-size: 1.35em;
 }
 
-.script-table.is-nowrap tbody td .editable-cell:focus {
+.script-table tbody td .editable-cell:focus {
   white-space: pre-wrap;
   overflow: visible;
   text-overflow: clip;
+  max-block-size: none;
 }
 
 .script-table.is-wrap tbody td {
@@ -333,8 +348,9 @@
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
-  inline-size: 58px;
+  text-align: center;
   white-space: nowrap;
+  overflow: hidden;
 }
 
 .col-source-end {
