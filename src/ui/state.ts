@@ -29,9 +29,9 @@ export type RowFilterMode = "all" | "extractable" | "missing" | "matched" | "rev
 export type TableWrapMode = "nowrap" | "wrap";
 export type TableFontSize = "sm" | "md" | "lg";
 
-export const DEFAULT_TABLE_COL_WIDTHS = [44, 78, 96, 175, 185, 210, 140, 175];
+export const DEFAULT_TABLE_COL_WIDTHS = [50, 86, 96, 175, 185, 210, 145, 175];
 
-const COL_WIDTHS_STORAGE_KEY = "script_lang_col_widths_v2";
+const COL_WIDTHS_STORAGE_KEY = "script_lang_col_widths_v3";
 
 function loadSavedColWidths(): number[] {
   try {

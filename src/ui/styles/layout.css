@@ -334,8 +334,17 @@
 }
 
 .script-table.is-wrap tbody td {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.script-table.is-wrap tbody td .cell-clip {
   white-space: pre-wrap;
   overflow-wrap: break-word;
+}
+
+.script-table tbody td.cell-timecode .cell-clip {
+  white-space: pre;
 }
 
 .script-table tbody th {
