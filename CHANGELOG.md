@@ -2,6 +2,17 @@
 
 All notable changes to **剧本对应语系工作台 (Script Language Matcher)** will be documented in this file.
 
+## [0.2.2] - 2026-11-19 (Verified Baseline)
+
+### Fixed & Improved
+- **多语种实测稳定版里程碑**：
+  - 修复浏览器调用 Google API 时 `Window.fetch Illegal invocation` 报错（`sheets-client.ts`, `docs-client.ts`, `gemini-client.ts`）。
+  - 新增脱敏本地诊断日志（`logs/workbench.log`）与界面一键「导出日志」，精准解析并展示 Google Docs / Drive / Sheets API `HTTP 403` 具体原因。
+  - 优化工作台桌面端布局（`layout.css`, `preview-table.ts`）：锁定顶部导航栏、语种/筛选栏与表头永不滚出视口；默认「单行紧凑」防长篇目撑高行高，支持「单行紧凑 / 自动换行」切换、「小/中/大」字号调节与表头鼠标拖拽调宽。
+  - 修复卷六 / 卷七同名篇目（如《怎样追求真理（三）》）串卷匹配，按筛选列/摘自卷号严格消歧；新增 `drive.google.com/open?id=...` 与 `/uc?id=...` 链接解析支持。
+  - 完善各语种《六本书新摘自》列配置：支持任意缺失列留空/填`无`并自动从中文摘自反推篇目名；新增第 9 列 `外文字幕带摘自`（如印尼语 I 列 `Dikutip dari ...`）。
+  - 修复诗歌歌词表解析与多行对齐：自动探测 A 列为空的 `B/C/D` 偏移表、禁止无标点歌词行（如 `每天吃喝神话`）误拆诗歌、支持高相似度歌词聚合（兼容差 1~2 字如 `神的话语是真理` ↔ `神的话语都是真理`），全套 24 项单元测试通过。
+
 ## [0.2.1] - 2026-11-19
 
 ### Changed
