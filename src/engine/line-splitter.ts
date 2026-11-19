@@ -86,26 +86,30 @@ export function sliceTokensBySpans(
   rule: PunctuationRule,
 ): string[] | null {
   if (!Array.isArray(spans) || spans.length !== sourceRows.length || tokens.length === 0) return null;
-  let prevStart = -1;
+  let prevEnd = -1;
   const out: string[] = [];
 
   for (let i = 0; i < spans.length; i += 1) {
     const sp = spans[i];
-    if (
-      typeof sp?.start !== "number" ||
-      typeof sp?.end !== "number" ||
-      !Number.isInteger(sp.start) ||
-      !Number.isInteger(sp.end) ||
-      sp.start < 0 ||
-      sp.end < sp.start ||
-      sp.end >= tokens.length ||
-      sp.start < prevStart
-    ) {
-      return null;
-    }
-    prevStart = sp.start;
+    if (typeof sp?.start !== "number" || typeof sp?.end !== "number") return null;
+    let start = Math.round(sp.start);
+    let end = Math.round(sp.end);
 
-    let chunk = tokens.slice(sp.start, sp.end + 1).join(joinSep).trim();
+    // Tolerate minor off-by-one boundary slips from fast Flash-Lite models without dropping the whole block
+    if (end >= tokens.length) end = tokens.length - 1;
+    if (start < 0) start = 0;
+    if (i > 0 && start <= prevEnd && prevEnd + 1 <= end) start = prevEnd + 1;
+    if (start > end) {
+      if (prevEnd + 1 < tokens.length) {
+        start = prevEnd + 1;
+        end = Math.min(tokens.length - 1, start);
+      } else {
+        return null;
+      }
+    }
+    prevEnd = end;
+
+    let chunk = tokens.slice(start, end + 1).join(joinSep).trim();
     if (!chunk) return null;
 
     const row = sourceRows[i];
@@ -123,6 +127,59 @@ export function sliceTokensBySpans(
     out.push(chunk);
   }
   return out;
+}
+
+const SINGLE_TEXT_SCHEMA = {
+  type: "object",
+  properties: {
+    lines: { type: "array", items: { type: "string" } },
+  },
+  required: ["lines"],
+};
+
+function verifyOrderedSubstrings(sourceText: string, lines: string[]): boolean {
+  const norm = (s: string) =>
+    s.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  const full = norm(sourceText);
+  if (!full) return false;
+  let cursor = 0;
+  for (const l of lines) {
+    const k = norm(l);
+    if (!k) continue;
+    const pos = full.indexOf(k, cursor);
+    if (pos < 0) return false;
+    cursor = pos + k.length;
+  }
+  return true;
+}
+
+async function retrySingleBlockWithTextAlignment(
+  req: BatchSplitRequest,
+  rule: PunctuationRule,
+  gemini: GeminiPoolClient,
+): Promise<string[] | null> {
+  try {
+    const rowsSpec = req.sourceRows
+      .map((r, i) => `[${i + 1}] ZH: ${r.chinese} | EN: ${r.english}${r.remark ? ` | 备注: ${r.remark}` : ""}`)
+      .join("\n");
+    const res = await gemini.generateStructuredJson<{ lines: string[] }>({
+      systemInstruction:
+        "你是多语种影视字幕逐行切分助手。将给定的目标语定稿原文严格按各行中英文语义边界切分为完全相同行数的数组。严禁改写、重译或编造任何词，所有文字必须原封不动来自定稿原文；不加最外层双引号。",
+      userPrompt: `目标语种：${rule.langName}\n${req.referenceEn ? `原段英文参考：${req.referenceEn}\n` : ""}定稿原文：\n${stripOuterDoubleQuotes(req.aiSourceText)}\n\n目标字幕行（共 ${req.sourceRows.length} 行，返回数组长度必须严格等于 ${req.sourceRows.length}）：\n${rowsSpec}`,
+      jsonSchema: SINGLE_TEXT_SCHEMA,
+    });
+    if (
+      Array.isArray(res.lines) &&
+      res.lines.length === req.sourceRows.length &&
+      res.lines.every((l) => l.trim().length > 0) &&
+      verifyOrderedSubstrings(req.aiSourceText, res.lines)
+    ) {
+      return res.lines.map((l) => l.trim());
+    }
+  } catch {
+    // ignore retry failure
+  }
+  return null;
 }
 
 export function deterministicSplitLines(
@@ -274,8 +331,17 @@ export async function batchSplitTargetsWithAi(
           resultMap.set(req.id, { lines: sliced, usedAi: true });
           aiHits += 1;
         } else {
-          diagLog.warn("AI 词序号校验回退", `[${rule.langName}] 任务 ${req.id} 未通过边界校验，已回退本地切分`);
-          resultMap.set(req.id, { lines: deterministicSplitLines(req.fallbackText, req.sourceRows, rule), usedAi: false });
+          const retried = await retrySingleBlockWithTextAlignment(req, rule, gemini);
+          if (retried) {
+            resultMap.set(req.id, { lines: retried, usedAi: true });
+            aiHits += 1;
+          } else {
+            diagLog.warn(
+              "AI 词序号校验回退",
+              `[${rule.langName}] 任务 ${req.id} (返回 ${spans?.length ?? 0} 段 / 需要 ${req.sourceRows.length} 行，词数 ${tk.tokens.length}) 未通过校验，已回退本地切分`,
+            );
+            resultMap.set(req.id, { lines: deterministicSplitLines(req.fallbackText, req.sourceRows, rule), usedAi: false });
+          }
         }
       }
       diagLog.info("AI 批量分句", `[${rule.langName}] 本批 ${batch.length} 块，词序号精准命中 ${aiHits} 块`);

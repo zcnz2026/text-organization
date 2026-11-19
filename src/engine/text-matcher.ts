@@ -403,6 +403,18 @@ export function resolveCitationText(
 
   const hymn = findHymnMatch(catalog.hymns, row.chinese || row.filterCategory);
   if (hymn?.targetCitation) return hymn.targetCitation;
+  if (hymn?.targetTitle && row.chinese.includes("跟随羔羊唱新歌")) {
+    const bookPair = catalog.citations.find(
+      (p) => p.keyZh.includes("跟随羔羊唱新歌") && !p.keyZh.includes("・") && !p.keyZh.includes("·"),
+    );
+    const bookStem = bookPair ? pickFromPair(bookPair) : "";
+    if (bookStem) {
+      if (bookStem.endsWith(catalog.rule.doubleClose)) {
+        return `${bookStem.slice(0, -catalog.rule.doubleClose.length)}. ${hymn.targetTitle}${catalog.rule.doubleClose}`;
+      }
+      return `${bookStem}, ${hymn.targetTitle}`;
+    }
+  }
 
   const article = findArticleInCatalog(catalog.articles, row.filterCategory || row.chinese, row.chinese, row.english);
   if (article) {
