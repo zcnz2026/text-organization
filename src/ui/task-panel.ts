@@ -13,6 +13,8 @@ function urlHintBadge(raw: string, fallback = "待填写"): string {
 const esc = (s: string) =>
   (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+let langDropdownOpen = false;
+
 export function renderTaskPanel(
   container: HTMLElement,
   actions: {
@@ -46,45 +48,53 @@ export function renderTaskPanel(
     )
     .join("");
 
+  const selectedPreview =
+    s.selectedLanguages.length === 0
+      ? "点击下拉勾选目标语种..."
+      : s.selectedLanguages.length <= 3
+        ? `已选 ${s.selectedLanguages.length} 个：${s.selectedLanguages.join("、")}`
+        : `已选 ${s.selectedLanguages.length} 个：${s.selectedLanguages.slice(0, 3).join("、")} 等`;
+
   container.innerHTML = `
     <aside class="setup-rail" aria-label="任务与资源配置">
       <section class="rail-section">
-        <h2 class="section-heading">云端配置与任务表格</h2>
-
-        <div class="field-group">
-          <div class="field-label-row">
-            <label class="field-label" for="inp-cloud-cfg-url">云端总配置表链接</label>
-            <span class="field-hint">${esc(urlHintBadge(store.cloudConfigUrl, "可选 · 团队共享"))}</span>
-          </div>
-          <input id="inp-cloud-cfg-url" type="url" class="text-input" placeholder="粘贴 4-Sheet 云端总配置表链接（留空读本地或源表配置）" value="${esc(store.cloudConfigUrl)}" ${store.busy ? "disabled" : ""} />
-          <div class="btn-row-equal">
-            <button type="button" id="btn-refresh-cloud-cfg" class="btn btn-compact" ${store.busy ? "disabled" : ""}>${icons.cloudSync}<span>刷新云端配置</span></button>
-            <button type="button" id="btn-dl-config-tpl" class="btn btn-compact" ${store.busy ? "disabled" : ""}>${icons.download}<span>导出配置模板 (.xlsx)</span></button>
+        <div class="field-label-row">
+          <div style="display:flex;align-items:center;gap:0.4rem">
+            <button type="button" id="btn-dl-config-tpl" class="seg-option" ${store.busy ? "disabled" : ""} title="导出 3-Sheet 云端共享配置表模板 (.xlsx)">模板</button>
+            <h2 class="section-heading">云端配置与任务表格</h2>
           </div>
         </div>
 
         <div class="field-group">
           <div class="field-label-row">
-            <label class="field-label" for="inp-source-url">源剧本 Google 表格</label>
-            <button type="button" id="btn-open-source-cols" class="seg-option" ${store.busy ? "disabled" : ""}>列位置设置 (A~L)</button>
+            <label class="field-label" for="inp-cloud-cfg-url">云端总配置表（执行前自动刷新）</label>
+            <span class="field-hint">${esc(urlHintBadge(store.cloudConfigUrl, "可选"))}</span>
           </div>
-          <input id="inp-source-url" type="url" class="text-input" placeholder="粘贴含 #gid=... 的源剧本链接" value="${esc(s.sourceSpreadsheetUrl)}" ${store.busy ? "disabled" : ""} />
+          <div class="input-inline-row">
+            <input id="inp-cloud-cfg-url" type="url" class="text-input" placeholder="粘贴云端总配置表链接" value="${esc(store.cloudConfigUrl)}" ${store.busy ? "disabled" : ""} />
+            <button type="button" id="btn-refresh-cloud-cfg" class="btn btn-compact" ${store.busy ? "disabled" : ""} title="立即刷新云端配置">刷新</button>
+          </div>
         </div>
 
         <div class="field-group">
-          <div class="field-label-row">
-            <label class="field-label" for="inp-output-url">专用输出 Google 表格</label>
-            <span class="field-hint">${s.outputSpreadsheetUrl.trim() ? "分语种写入此表" : "待填写"}</span>
+          <label class="field-label" for="inp-source-url">源剧本 Google 表格</label>
+          <div class="input-inline-row">
+            <input id="inp-source-url" type="url" class="text-input" placeholder="粘贴含 #gid=... 的源剧本链接" value="${esc(s.sourceSpreadsheetUrl)}" ${store.busy ? "disabled" : ""} />
+            <button type="button" id="btn-open-source-cols" class="btn btn-compact" ${store.busy ? "disabled" : ""} title="源剧本列位置设置 (A~L)">列位</button>
           </div>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="inp-output-url">专用输出 Google 表格</label>
           <input id="inp-output-url" type="url" class="text-input" placeholder="粘贴有编辑权限的输出专用表格链接" value="${esc(s.outputSpreadsheetUrl)}" ${store.busy ? "disabled" : ""} />
         </div>
 
         <div class="field-group">
-          <div class="field-label-row">
-            <label class="field-label" for="inp-hymn-kw">本期诗歌子表匹配词（可选）</label>
-            <button type="button" id="btn-rail-open-catalog" class="seg-option" ${store.busy ? "disabled" : ""}>资源与列配置清单</button>
+          <label class="field-label" for="inp-hymn-kw">本期诗歌子表匹配词（可选）</label>
+          <div class="input-inline-row">
+            <input id="inp-hymn-kw" type="text" class="text-input" placeholder="如：39期.葡萄牙 或 39期" value="${esc(store.hymnEpisodeKeyword)}" ${store.busy ? "disabled" : ""} />
+            <button type="button" id="btn-rail-open-catalog" class="btn btn-compact" ${store.busy ? "disabled" : ""} title="打开资源与列配置清单">清单</button>
           </div>
-          <input id="inp-hymn-kw" type="text" class="text-input" placeholder="如：39期.葡萄牙 或 39期，自动匹配各语种诗歌子表" value="${esc(store.hymnEpisodeKeyword)}" ${store.busy ? "disabled" : ""} />
           <details class="compact-details">
             <summary>单语种临时诗歌链接 (${Object.keys(store.episodeHymnOverrides).length})</summary>
             <div class="compact-details-body">${overrideInputsHtml}</div>
@@ -102,17 +112,26 @@ export function renderTaskPanel(
 
       <section class="rail-section">
         <div class="field-label-row">
-          <h2 class="section-heading">目标输出语种 (${s.selectedLanguages.length}/${store.availableLanguages.length})</h2>
-          <div style="display:flex;gap:0.35rem">
-            <button type="button" id="btn-select-all-langs" class="seg-option" ${store.busy ? "disabled" : ""}>全选</button>
-            <button type="button" id="btn-clear-langs" class="seg-option" ${store.busy ? "disabled" : ""}>清空</button>
+          <h2 class="section-heading">目标输出语种</h2>
+          <span class="field-hint">${s.selectedLanguages.length}/${store.availableLanguages.length}</span>
+        </div>
+        <details id="det-lang-picker" class="lang-dropdown" ${langDropdownOpen ? "open" : ""}>
+          <summary class="lang-dropdown-summary">${esc(selectedPreview)}</summary>
+          <div class="lang-dropdown-panel">
+            <div class="field-label-row" style="padding-block-end:0.35rem;border-block-end:1px solid var(--border-subtle)">
+              <span class="field-hint">勾选本次需要生成的语种</span>
+              <div style="display:flex;gap:0.3rem">
+                <button type="button" id="btn-select-all-langs" class="seg-option" ${store.busy ? "disabled" : ""}>全选</button>
+                <button type="button" id="btn-clear-langs" class="seg-option" ${store.busy ? "disabled" : ""}>清空</button>
+              </div>
+            </div>
+            <div class="lang-grid">${langItemsHtml}</div>
+            <div class="input-inline-row" style="padding-block-start:0.35rem;border-block-start:1px solid var(--border-subtle)">
+              <input id="inp-new-lang" type="text" class="text-input" placeholder="新增语种（如：泰语）" ${store.busy ? "disabled" : ""} />
+              <button type="button" id="btn-add-lang" class="btn btn-compact" ${store.busy ? "disabled" : ""}>+ 新增</button>
+            </div>
           </div>
-        </div>
-        <div class="lang-grid">${langItemsHtml}</div>
-        <div style="display:flex;gap:0.4rem">
-          <input id="inp-new-lang" type="text" class="text-input" placeholder="添加其他语种（如：泰语）" ${store.busy ? "disabled" : ""} />
-          <button type="button" id="btn-add-lang" class="btn btn-compact" ${store.busy ? "disabled" : ""}>添加</button>
-        </div>
+        </details>
         <label class="checkbox-row">
           <input type="checkbox" id="chk-roster" ${s.enableRosterPreFill ? "checked" : ""} ${store.busy ? "disabled" : ""} />
           <span>启用人名/教会名库预填（附核对提示）</span>
@@ -164,6 +183,11 @@ export function renderTaskPanel(
       else delete store.episodeHymnOverrides[lang];
       notifyStateChanged();
     });
+  });
+
+  const detLang = container.querySelector<HTMLDetailsElement>("#det-lang-picker");
+  detLang?.addEventListener("toggle", () => {
+    langDropdownOpen = detLang.open;
   });
 
   container.querySelector("#btn-refresh-cloud-cfg")?.addEventListener("click", actions.onRefreshCloudConfig);

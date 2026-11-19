@@ -177,10 +177,20 @@ export async function runMultiLanguageExtraction(): Promise<void> {
   if (!store.scriptDoc) return setErr("请先读取云端源剧本或导入本地 CSV 源稿。");
   const targetLangs = store.settings.selectedLanguages;
   if (targetLangs.length === 0) return setErr("请至少勾选一个目标输出语种。");
-  startBusy(5, "正在初始化云端资料库加载器...");
+  startBusy(3, "正在初始化云端资料库加载器...");
   try {
     const { sheets, docs } = createCloudClients();
     const loader = new CloudCatalogLoader(sheets, docs);
+    if (store.cloudConfigUrl.trim()) {
+      store.progressText = "正在自动同步最新云端总配置表...";
+      notifyStateChanged();
+      try {
+        const cfg = await loader.loadCloudWorkspaceConfig(store.cloudConfigUrl);
+        applyCloudWorkspaceConfig(cfg);
+      } catch (cfgErr) {
+        diagLog.warn("自动刷新云端配置失败", cfgErr instanceof Error ? cfgErr.message : String(cfgErr));
+      }
+    }
     let gemini: GeminiPoolClient | undefined;
     if (store.geminiEnabled && store.geminiSummary.count > 0) {
       const keys = await hostBridge.getPlainGeminiKeys();
