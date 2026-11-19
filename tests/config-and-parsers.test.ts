@@ -131,8 +131,8 @@ function makeScriptRow(partial: Partial<ScriptRow> & { rowIndex: number }): Scri
   };
 }
 
-describe("Cloud Configuration 4-Sheet Template & Round-Trip Parser", () => {
-  it("builds valid 4-tab .xlsx bytes and round-trips custom settings across all 4 tabs", () => {
+describe("Cloud Configuration 3-Sheet Template & Round-Trip Parser", () => {
+  it("builds valid 3-tab .xlsx bytes and round-trips custom settings across all 3 tabs", () => {
     const customBytes = buildConfigTemplateXlsx({
       sourceCols: {
         autoDetectByHeader: false,
@@ -221,7 +221,6 @@ describe("Cloud Configuration 4-Sheet Template & Round-Trip Parser", () => {
     expect(customBytes.byteLength).toBeGreaterThan(2000);
     const extractedTabs = extractWorksheetsFromUncompressedXlsx(customBytes);
     expect([...extractedTabs.keys()]).toEqual([
-      CONFIG_TEMPLATE_SHEET_NAMES.shared,
       CONFIG_TEMPLATE_SHEET_NAMES.links,
       CONFIG_TEMPLATE_SHEET_NAMES.cols,
       CONFIG_TEMPLATE_SHEET_NAMES.rules,
@@ -263,6 +262,32 @@ describe("Cloud Configuration 4-Sheet Template & Round-Trip Parser", () => {
     expect(frRule.doubleClose).toBe(" »");
     const jaRule = parsed.rules.find((r) => r.langName === "日语")!;
     expect(jaRule.sentencePeriodChar).toBe("");
+  });
+
+  it("ignores free-form human guide rows and applies language overrides in 2-row positioning sheet", () => {
+    const sheets = new Map<string, RichSheetGrid>([
+      [
+        CONFIG_TEMPLATE_SHEET_NAMES.links,
+        toRichGrid([
+          ["语系", "六本书新摘自", "圣经经文库", "新俗语表", "诗歌歌词表", "备注"],
+          ["乌克兰语", "https://docs.google.com/spreadsheets/d/uk_cat", "https://docs.google.com/spreadsheets/d/uk_bib", "", "", ""],
+          ["西班牙语", "https://docs.google.com/spreadsheets/d/es_cat", "https://docs.google.com/spreadsheets/d/es_bib", "", "", ""],
+        ]),
+      ],
+      [
+        CONFIG_TEMPLATE_SHEET_NAMES.cols,
+        toRichGrid([
+          ["语系", "表格名称", "表头行", "列1", "列2", "列3", "列4"],
+          ["乌克兰语圣经经文表头", "圣经经文库", "表头行", "英文章节B列", "C列中文经文", "D列英文经文", "F列乌克兰语经文"],
+          ["乌克兰语", "圣经经文库", "3", "B", "C", "D", "F"],
+        ]),
+      ],
+    ]);
+    const parsed = parseCloudConfigSheets(sheets);
+    expect(parsed.colsByLang["乌克兰语"].bibleHeaderRow).toBe(3);
+    expect(parsed.colsByLang["乌克兰语"].bibleTargetCol).toBe("F");
+    expect(parsed.colsByLang["西班牙语"].bibleHeaderRow).toBe(2);
+    expect(parsed.colsByLang["西班牙语"].bibleTargetCol).toBe("E");
   });
 });
 

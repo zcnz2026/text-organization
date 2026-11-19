@@ -69,7 +69,7 @@ export function mountCatalogConfigDialog(
 
     const tabSpecHtml = `
       <div class="btn-row-compact" style="justify-content:space-between">
-        <span class="field-hint">所有模块链接与列号均可在此维护，或导出为 4-Sheet 标准模板上传至 Google 云端供团队共享。</span>
+        <span class="field-hint">所有模块链接与列号均可在此维护，或导出 3-Sheet 简明中文模板（1_资料表链接 / 2_表内列位置定位 / 3_标点规则）上传至 Google 云端供团队共享。</span>
         <button type="button" id="btn-dl-cfg-tpl" class="btn btn-primary">${icons.download}<span>导出标准云端配置表模板 (.xlsx)</span></button>
       </div>
       <div class="spec-table-wrap">
