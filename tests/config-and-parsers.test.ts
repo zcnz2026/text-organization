@@ -911,4 +911,27 @@ describe("Custom SourceScriptColumnConfig remapped columns", () => {
     expect(romHit!.text).toContain("Я бо чиню не те");
     expect(romHit!.text).toContain("А коли роблю те");
   });
+
+  it("slices single-row half-sentence excerpts at clause boundary (non-AI) and marks isPartial for AI semantic alignment", () => {
+    const paragraphs = [
+      {
+        chinese: "在人的败坏性情里有个共性的问题，这是每个人里面都存在的问题，而且是一个很严重的问题，这个共性的问题就是人性最软弱、最致命的地方。",
+        english: "There is a common problem in the corrupt disposition of people, a problem which exists within everyone, and a very severe one at that. This common problem is the weakest, most fatal part of their humanity.",
+        target: "Розбещеному характеру людей притаманна спільна проблема — проблема, яка є всередині кожного, і при цьому дуже тяжка проблема. Ця спільна проблема є найслабшою, найфатальнішою частиною їхньої людськості.",
+      },
+    ];
+    const row452 = [
+      makeScriptRow({
+        rowIndex: 0,
+        line: "452",
+        chinese: "“在人的败坏性情里有个共性的问题，",
+        english: '"There is a common problem in the corrupt disposition of people,',
+      }),
+    ];
+    const loc = locateParagraphInManuscript(paragraphs, row452);
+    expect(loc).not.toBeNull();
+    expect(loc!.isPartial).toBe(true);
+    expect(loc!.matchedText).not.toContain("тяжка проблема.");
+    expect(loc!.fullParagraphTarget).toContain("Ця спільна проблема");
+  });
 });

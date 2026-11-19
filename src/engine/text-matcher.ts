@@ -101,7 +101,7 @@ export function findArticleInCatalog(
 export function locateParagraphInManuscript(
   paragraphs: ArticleParagraph[],
   sourceRows: ScriptRow[],
-): { matchedText: string; truncatedStart: boolean } | null {
+): { matchedText: string; fullParagraphTarget: string; isPartial: boolean; truncatedStart: boolean } | null {
   if (paragraphs.length === 0 || sourceRows.length === 0) return null;
   const firstRow = sourceRows[0];
   const lastRow = sourceRows[sourceRows.length - 1];
@@ -136,28 +136,40 @@ export function locateParagraphInManuscript(
   const fullParaZh = normMatchKey(paragraphs[startIdx].chinese);
   const allRowsZh = normMatchKey(sourceRows.map((r) => r.chinese).join(""));
 
-  if (endIdx === startIdx && fullParaZh.length > allRowsZh.length + 12) {
-    const startRatio = Math.max(0, fullParaZh.indexOf(firstZhProbe) / Math.max(1, fullParaZh.length));
-    const endPos = fullParaZh.lastIndexOf(lastZhProbe);
-    const endRatio = endPos >= 0 ? Math.min(1, (endPos + lastZhProbe.length) / Math.max(1, fullParaZh.length)) : 1;
-    if (startRatio > 0.06 || endRatio < 0.92) {
-      return { matchedText: sliceBySentenceRatio(combinedTarget, startRatio, endRatio), truncatedStart: Boolean(truncMatch) };
+  if (endIdx === startIdx && fullParaZh.length > allRowsZh.length + 10) {
+    const startPos = firstZhProbe ? fullParaZh.indexOf(firstZhProbe) : 0;
+    const startRatio = Math.max(0, (startPos >= 0 ? startPos : 0) / Math.max(1, fullParaZh.length));
+    const endPos = lastZhProbe ? fullParaZh.lastIndexOf(lastZhProbe) : -1;
+    const endRatio = endPos >= 0 ? Math.min(1, (endPos + lastZhProbe.length) / Math.max(1, fullParaZh.length)) : Math.min(1, startRatio + allRowsZh.length / Math.max(1, fullParaZh.length));
+    if (startRatio > 0.04 || endRatio < 0.94) {
+      return {
+        matchedText: sliceByClauseRatio(combinedTarget, startRatio, endRatio),
+        fullParagraphTarget: combinedTarget,
+        isPartial: true,
+        truncatedStart: Boolean(truncMatch),
+      };
     }
   }
-  return { matchedText: combinedTarget, truncatedStart: Boolean(truncMatch) };
+  return {
+    matchedText: combinedTarget,
+    fullParagraphTarget: combinedTarget,
+    isPartial: false,
+    truncatedStart: Boolean(truncMatch),
+  };
 }
 
-function sliceBySentenceRatio(text: string, startRatio: number, endRatio: number): string {
-  const sentences = text.split(/(?<=[.!?。！？;；])\s+/u).map((s) => s.trim()).filter(Boolean);
-  if (sentences.length <= 1) return text;
+function sliceByClauseRatio(text: string, startRatio: number, endRatio: number): string {
+  const clauses = text.split(/(?<=[.!?。！？;；,，—–])\s+/u).map((s) => s.trim()).filter(Boolean);
+  if (clauses.length <= 1) return text;
   const totalLen = text.length;
   let acc = 0;
   const picked: string[] = [];
-  for (const s of sentences) {
-    if ((acc + s.length) / totalLen > startRatio - 0.04 && acc / totalLen < endRatio + 0.04) picked.push(s);
-    acc += s.length + 1;
+  for (const c of clauses) {
+    const mid = (acc + c.length * 0.5) / totalLen;
+    if (mid >= startRatio - 0.02 && mid <= endRatio + 0.02) picked.push(c);
+    acc += c.length + 1;
   }
-  return picked.length > 0 ? picked.join(" ") : text;
+  return picked.length > 0 ? picked.join(" ") : clauses[0];
 }
 
 function splitBibleTargetAndRef(raw: string): { body: string; ref: string } {

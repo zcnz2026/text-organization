@@ -346,7 +346,10 @@ async function extractFromArticleManuscript(
     return;
   }
 
-  const split = await splitTargetIntoScriptLines(located.matchedText, blockRows, catalog.rule, options.gemini);
+  const split = await splitTargetIntoScriptLines(located.matchedText, blockRows, catalog.rule, options.gemini, {
+    fullParagraphTarget: located.fullParagraphTarget,
+    isPartial: located.isPartial,
+  });
   const quoted = formatQuotedBlockLines(split.lines, catalog.rule, true);
   const hasOmission = blockRows.some((r) => r.remark.includes("有省略") || r.chinese.includes("……"));
 
@@ -356,12 +359,16 @@ async function extractFromArticleManuscript(
     const rowOmit = blockRows[k].remark.includes("有省略") || blockRows[k].chinese.includes("……");
     if (rowTrunc) {
       results[rIdx].status = "warning";
-      results[rIdx].hint = "涉及句首截取，请核对外文截取位置与首字母大小写";
+      results[rIdx].hint = split.usedAi ? "AI 已精准截取，请顺便核对首字母大小写" : "涉及句首截取（未启用AI），请核对外文截取位置";
     } else if (rowOmit) {
       results[rIdx].status = "warning";
       results[rIdx].hint = "此处原文中间有省略，请核对省略号衔接";
+    } else if (located.isPartial && !split.usedAi) {
+      results[rIdx].status = "warning";
+      results[rIdx].hint = "局部半句截取（未启用 AI，已按子句估算），建议开启 API 密钥池提升精准度";
     } else {
       results[rIdx].status = hasOmission && !split.usedAi ? "warning" : "matched";
+      if (split.usedAi && k === 0) results[rIdx].hint = "AI 已按中英文语义精准分句";
     }
   });
 }

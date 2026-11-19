@@ -1,4 +1,5 @@
 import type { GeminiPoolClient } from "../ai/gemini-client";
+import { diagLog } from "../platform/diag-log";
 import type { PunctuationRule, ScriptRow } from "../types/domain";
 import { stripOuterDoubleQuotes } from "./punctuation";
 
@@ -28,7 +29,18 @@ function verifyTokensSubsequence(sourceText: string, candidateLines: string[]): 
   const fullNorm = norm(sourceText);
   const candNorm = norm(candidateLines.join(""));
   if (!candNorm) return false;
-  return fullNorm.includes(candNorm) || candNorm === fullNorm;
+  if (fullNorm.includes(candNorm) || candNorm === fullNorm) return true;
+
+  // Support ordered substring verification when the script omits middle clauses (有省略)
+  let cursor = 0;
+  for (const line of candidateLines) {
+    const clean = norm(line);
+    if (!clean) continue;
+    const pos = fullNorm.indexOf(clean, cursor);
+    if (pos < 0) return false;
+    cursor = pos + clean.length;
+  }
+  return true;
 }
 
 export function deterministicSplitLines(
@@ -124,10 +136,14 @@ export async function splitTargetIntoScriptLines(
   sourceRows: ScriptRow[],
   rule: PunctuationRule,
   gemini?: GeminiPoolClient,
+  opts?: { fullParagraphTarget?: string; isPartial?: boolean },
 ): Promise<{ lines: string[]; usedAi: boolean }> {
-  if (sourceRows.length <= 1) {
+  const needAi = sourceRows.length > 1 || Boolean(opts?.isPartial);
+  if (!needAi) {
     return { lines: [stripOuterDoubleQuotes(rawTargetParagraph)], usedAi: false };
   }
+
+  const aiSourceText = stripOuterDoubleQuotes(opts?.fullParagraphTarget || rawTargetParagraph);
 
   if (gemini?.hasKeys) {
     try {
@@ -140,8 +156,8 @@ export async function splitTargetIntoScriptLines(
 
       const res = await gemini.generateStructuredJson<{ lines: string[] }>({
         systemInstruction:
-          "你是多语种影视字幕逐行对齐助手。将给定的目标语种定稿段落严格按各行中英文语义边界切分为完全相同行数的数组。严禁改写、增删或重译原文任何词汇；若某行备注有省略则在该行末尾补省略号；若首行备注涉及截取则去掉被截取的前导词并将新句首字母大写；不加最外层起止双引号。",
-        userPrompt: `目标语种：${rule.langName}\n待切分定稿原文：\n${stripOuterDoubleQuotes(rawTargetParagraph)}\n\n目标字幕行（共 ${sourceRows.length} 行）：\n${rowSpec}`,
+          "你是多语种影视字幕逐行精准截取与对齐助手。根据各行中英文语义起止边界，从给定的目标语种定稿原段中逐字截取并切分为完全相同行数的数组。如果剧本只摘录了原段中的前半句或局部片段，必须严格只截出与中英文完全对应的那一段外文，不可多带后半句。严禁改写、增删或重译原文任何词汇；若某行备注有省略则在该行末尾补省略号；若首行备注涉及截取则去掉被截取的前导词并将新句首字母大写；不加最外层起止双引号。",
+        userPrompt: `目标语种：${rule.langName}\n定稿原段（请严格从中逐字截取，勿多取或改词）：\n${aiSourceText}\n\n目标字幕行（共 ${sourceRows.length} 行）：\n${rowSpec}`,
         jsonSchema: SPLIT_SCHEMA,
       });
 
@@ -149,12 +165,13 @@ export async function splitTargetIntoScriptLines(
         Array.isArray(res.lines) &&
         res.lines.length === sourceRows.length &&
         res.lines.every((l) => l.trim().length > 0) &&
-        verifyTokensSubsequence(rawTargetParagraph, res.lines)
+        verifyTokensSubsequence(aiSourceText, res.lines)
       ) {
         return { lines: res.lines.map((l) => l.trim()), usedAi: true };
       }
-    } catch {
-      // Fallback cleanly to deterministic clause splitter
+      diagLog.warn("AI 分句校验未通过", `行${sourceRows[0]?.line || "?"} AI 输出未通过原词保真校验，已回退本地子句切分`);
+    } catch (err) {
+      diagLog.warn("AI 分句回退", `行${sourceRows[0]?.line || "?"} Gemini 调用失败，已回退本地切分`, err instanceof Error ? err.message : String(err));
     }
   }
 
