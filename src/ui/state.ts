@@ -175,13 +175,22 @@ function loadAiPrefs(): {
 } {
   try {
     const raw = localStorage.getItem(AI_SETTINGS_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { enabled?: boolean; model?: string; rotation?: KeyRotationStrategy };
+      const model: GeminiModelId =
+        parsed.model === "gemini-3.1-flash-lite" ? "gemini-3.1-flash-lite" : "gemini-3.5-flash-lite";
+      return {
+        enabled: parsed.enabled ?? true,
+        model,
+        rotation: parsed.rotation === "failover" ? "failover" : "round_robin",
+      };
+    }
   } catch {
     // ignore
   }
   return {
     enabled: true,
-    model: "gemini-3.8-flash",
+    model: "gemini-3.5-flash-lite",
     rotation: "round_robin",
   };
 }

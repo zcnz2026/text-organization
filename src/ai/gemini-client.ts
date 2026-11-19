@@ -4,10 +4,8 @@ export const SUPPORTED_GEMINI_MODELS: Array<{
   id: GeminiModelId;
   label: string;
 }> = [
-  { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash（推荐·跨语种语义对齐精准）" },
-  { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite（高速·大批量高吞吐）" },
-  { id: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash-Lite（轻量极速·低成本）" },
-  { id: "gemini-4-argon", label: "Gemini 4 Argon（高阶推理·复杂长段截取）" },
+  { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash Lite（默认）" },
+  { id: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite" },
 ];
 
 export interface GeminiCallInput {

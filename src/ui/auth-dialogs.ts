@@ -227,7 +227,7 @@ export function mountAuthDialogs(root: HTMLElement): {
         geminiDialog.querySelector<HTMLInputElement>("#chk-gemini-enable")?.checked ?? true;
       store.geminiModel =
         (geminiDialog.querySelector<HTMLSelectElement>("#sel-gemini-model")?.value as GeminiModelId) ??
-        "gemini-3.8-flash";
+        "gemini-3.5-flash-lite";
       store.geminiRotation =
         (geminiDialog.querySelector<HTMLSelectElement>("#sel-gemini-rot")?.value as KeyRotationStrategy) ??
         "round_robin";
