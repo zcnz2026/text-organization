@@ -9,7 +9,12 @@ import type {
   ScriptSheetDocument,
 } from "../types/domain";
 import { classifyScriptTasks } from "./classifier";
-import { splitTargetIntoScriptLines } from "./line-splitter";
+import {
+  type BatchSplitRequest,
+  batchSplitTargetsWithAi,
+  deterministicSplitLines,
+  splitTargetIntoScriptLines,
+} from "./line-splitter";
 import {
   formatBibleBlockAndCitation,
   formatQuotedBlockLines,
@@ -79,6 +84,11 @@ export async function splitLordsPrayerFullText(
   return [...(firstLineLead ? [firstLineLead] : []), ...midSplit.lines, ...(amenTail ? [amenTail] : [])];
 }
 
+interface DeferredAiSplit {
+  req: BatchSplitRequest;
+  apply: (split: { lines: string[]; usedAi: boolean }) => void;
+}
+
 export async function runLanguageExtractionPipeline(
   script: ScriptSheetDocument,
   catalog: LanguageCatalog,
@@ -93,6 +103,7 @@ export async function runLanguageExtractionPipeline(
   }));
 
   const tasks = classifyScriptTasks(script.rows);
+  const deferredSplits: DeferredAiSplit[] = [];
   const ensureManuscript = async (docUrl: string): Promise<ArticleParagraph[]> => {
     if (!docUrl) return [];
     const cached = catalog.articleDocsCache.get(docUrl);
@@ -105,8 +116,24 @@ export async function runLanguageExtractionPipeline(
 
   for (let tIdx = 0; tIdx < tasks.length; tIdx += 1) {
     const task = tasks[tIdx];
-    options.onProgress?.(tIdx + 1, tasks.length, task.sourceHint);
-    await processSingleTask(task, script.rows, catalog, results, options, ensureManuscript);
+    options.onProgress?.(tIdx + 1, tasks.length + (options.gemini?.hasKeys ? 1 : 0), task.sourceHint);
+    await processSingleTask(task, script.rows, catalog, results, options, ensureManuscript, deferredSplits);
+  }
+
+  if (deferredSplits.length > 0) {
+    options.onProgress?.(tasks.length, tasks.length + 1, `AI 批量语义分句 (${deferredSplits.length} 块)...`);
+    const batchMap = await batchSplitTargetsWithAi(
+      deferredSplits.map((d) => d.req),
+      catalog.rule,
+      options.gemini,
+    );
+    for (const d of deferredSplits) {
+      const hit = batchMap.get(d.req.id) ?? {
+        lines: deterministicSplitLines(d.req.fallbackText, d.req.sourceRows, catalog.rule),
+        usedAi: false,
+      };
+      d.apply(hit);
+    }
   }
 
   let matchedCount = 0;
@@ -127,6 +154,7 @@ async function processSingleTask(
   results: ProcessedRowResult[],
   options: PipelineOptions,
   ensureManuscript: (url: string) => Promise<ArticleParagraph[]>,
+  deferredSplits: DeferredAiSplit[],
 ): Promise<void> {
   const firstIdx = task.rowIndices[0];
   const firstRow = rows[firstIdx];
@@ -186,7 +214,20 @@ async function processSingleTask(
       return;
     }
     const sourceFull = fullText || catalog.lordsPrayer.map((p) => p.target).join(" ");
-    const splitLines = await splitLordsPrayerFullText(sourceFull, blockRows, catalog.rule, options.gemini);
+    if (options.gemini?.hasKeys && blockRows.length > 1) {
+      deferredSplits.push({
+        req: { id: task.id, fallbackText: sourceFull, aiSourceText: sourceFull, sourceRows: blockRows },
+        apply: (split) => {
+          task.rowIndices.forEach((rIdx, k) => {
+            results[rIdx].targetLanguage = split.lines[k] ?? "";
+            results[rIdx].status = "matched";
+            if (split.usedAi && k === 0) results[rIdx].hint = "AI 已按词序号精准切分主祷文";
+          });
+        },
+      });
+      return;
+    }
+    const splitLines = await splitLordsPrayerFullText(sourceFull, blockRows, catalog.rule, undefined);
     task.rowIndices.forEach((rIdx, k) => {
       results[rIdx].targetLanguage = splitLines[k] ?? "";
       results[rIdx].status = "matched";
@@ -209,21 +250,34 @@ async function processSingleTask(
       return;
     }
 
-    const split = await splitTargetIntoScriptLines(matched.text, verseRows, catalog.rule, options.gemini);
-    if (matched.truncatedStart && split.lines.length > 0 && !split.lines[0].startsWith(catalog.rule.ellipsis)) {
-      split.lines[0] = `${catalog.rule.ellipsis} ${split.lines[0]}`;
+    const applyBibleSplit = (split: { lines: string[]; usedAi: boolean }) => {
+      const linesCopy = [...split.lines];
+      if (matched.truncatedStart && linesCopy.length > 0 && !linesCopy[0].startsWith(catalog.rule.ellipsis)) {
+        linesCopy[0] = `${catalog.rule.ellipsis} ${linesCopy[0]}`;
+      }
+      const formatted = formatBibleBlockAndCitation(linesCopy, matched.targetCitationRef, catalog.rule);
+      task.rowIndices.forEach((rIdx, k) => {
+        results[rIdx].targetLanguage = formatted.verseLines[k];
+        results[rIdx].status = matched.truncatedStart ? "warning" : "matched";
+        if (matched.truncatedStart && k === 0) results[rIdx].hint = "涉及经文句首截取，请核对切分与省略号";
+        else if (split.usedAi && k === 0) results[rIdx].hint = "AI 已按词序号精准分句";
+      });
+      if (task.citationRowIndex !== undefined) {
+        results[task.citationRowIndex].targetLanguage = formatted.citationText;
+        results[task.citationRowIndex].status = "matched";
+      }
+    };
+
+    if (options.gemini?.hasKeys && verseRows.length > 1) {
+      deferredSplits.push({
+        req: { id: task.id, fallbackText: matched.text, aiSourceText: matched.text, sourceRows: verseRows },
+        apply: applyBibleSplit,
+      });
+      return;
     }
 
-    const formatted = formatBibleBlockAndCitation(split.lines, matched.targetCitationRef, catalog.rule);
-    task.rowIndices.forEach((rIdx, k) => {
-      results[rIdx].targetLanguage = formatted.verseLines[k];
-      results[rIdx].status = matched.truncatedStart ? "warning" : "matched";
-      if (matched.truncatedStart && k === 0) results[rIdx].hint = "涉及经文句首截取，请核对切分与省略号";
-    });
-    if (task.citationRowIndex !== undefined) {
-      results[task.citationRowIndex].targetLanguage = formatted.citationText;
-      results[task.citationRowIndex].status = "matched";
-    }
+    const split = await splitTargetIntoScriptLines(matched.text, verseRows, catalog.rule, undefined);
+    applyBibleSplit(split);
     return;
   }
 
@@ -246,7 +300,7 @@ async function processSingleTask(
       return;
     }
     if (task.sourceHint.includes("卷")) {
-      await extractFromArticleManuscript(task, rows, catalog, results, options, ensureManuscript);
+      await extractFromArticleManuscript(task, rows, catalog, results, options, ensureManuscript, deferredSplits);
       return;
     }
     for (const idx of task.rowIndices) {
@@ -257,7 +311,7 @@ async function processSingleTask(
   }
 
   if (task.kind === "god_words_body") {
-    await extractFromArticleManuscript(task, rows, catalog, results, options, ensureManuscript);
+    await extractFromArticleManuscript(task, rows, catalog, results, options, ensureManuscript, deferredSplits);
     return;
   }
 
@@ -323,6 +377,7 @@ async function extractFromArticleManuscript(
   results: ProcessedRowResult[],
   options: PipelineOptions,
   ensureManuscript: (url: string) => Promise<ArticleParagraph[]>,
+  deferredSplits: DeferredAiSplit[],
 ): Promise<void> {
   const blockRows = task.rowIndices.map((idx) => rows[idx]);
   const nextRow = rows[task.rowIndices[task.rowIndices.length - 1] + 1];
@@ -346,29 +401,49 @@ async function extractFromArticleManuscript(
     return;
   }
 
-  const split = await splitTargetIntoScriptLines(located.matchedText, blockRows, catalog.rule, options.gemini, {
-    fullParagraphTarget: located.fullParagraphTarget,
+  const applyArticleSplit = (split: { lines: string[]; usedAi: boolean }) => {
+    const quoted = formatQuotedBlockLines(split.lines, catalog.rule, true);
+    const hasOmission = blockRows.some((r) => r.remark.includes("有省略") || r.chinese.includes("……"));
+
+    task.rowIndices.forEach((rIdx, k) => {
+      results[rIdx].targetLanguage = quoted[k];
+      const rowTrunc = blockRows[k].remark.includes("涉及截取");
+      const rowOmit = blockRows[k].remark.includes("有省略") || blockRows[k].chinese.includes("……");
+      if (rowTrunc) {
+        results[rIdx].status = "warning";
+        results[rIdx].hint = split.usedAi ? "AI 已按词序号精准截取，请顺便核对首字母" : "涉及句首截取（未启用AI），请核对外文截取位置";
+      } else if (rowOmit) {
+        results[rIdx].status = "warning";
+        results[rIdx].hint = "此处原文中间有省略，请核对省略号衔接";
+      } else if (located.isPartial && !split.usedAi) {
+        results[rIdx].status = "warning";
+        results[rIdx].hint = "局部半句截取（未启用 AI，已按子句估算），建议开启 API 密钥池提升精准度";
+      } else {
+        results[rIdx].status = hasOmission && !split.usedAi ? "warning" : "matched";
+        if (split.usedAi && k === 0) results[rIdx].hint = "AI 已按词序号精准分句";
+      }
+    });
+  };
+
+  const needAi = blockRows.length > 1 || located.isPartial;
+  if (options.gemini?.hasKeys && needAi) {
+    deferredSplits.push({
+      req: {
+        id: task.id,
+        fallbackText: located.matchedText,
+        aiSourceText: located.contextWindowTarget,
+        referenceEn: located.fullParagraphEn,
+        sourceRows: blockRows,
+      },
+      apply: applyArticleSplit,
+    });
+    return;
+  }
+
+  const split = await splitTargetIntoScriptLines(located.matchedText, blockRows, catalog.rule, undefined, {
+    fullParagraphTarget: located.contextWindowTarget,
+    referenceEn: located.fullParagraphEn,
     isPartial: located.isPartial,
   });
-  const quoted = formatQuotedBlockLines(split.lines, catalog.rule, true);
-  const hasOmission = blockRows.some((r) => r.remark.includes("有省略") || r.chinese.includes("……"));
-
-  task.rowIndices.forEach((rIdx, k) => {
-    results[rIdx].targetLanguage = quoted[k];
-    const rowTrunc = blockRows[k].remark.includes("涉及截取");
-    const rowOmit = blockRows[k].remark.includes("有省略") || blockRows[k].chinese.includes("……");
-    if (rowTrunc) {
-      results[rIdx].status = "warning";
-      results[rIdx].hint = split.usedAi ? "AI 已精准截取，请顺便核对首字母大小写" : "涉及句首截取（未启用AI），请核对外文截取位置";
-    } else if (rowOmit) {
-      results[rIdx].status = "warning";
-      results[rIdx].hint = "此处原文中间有省略，请核对省略号衔接";
-    } else if (located.isPartial && !split.usedAi) {
-      results[rIdx].status = "warning";
-      results[rIdx].hint = "局部半句截取（未启用 AI，已按子句估算），建议开启 API 密钥池提升精准度";
-    } else {
-      results[rIdx].status = hasOmission && !split.usedAi ? "warning" : "matched";
-      if (split.usedAi && k === 0) results[rIdx].hint = "AI 已按中英文语义精准分句";
-    }
-  });
+  applyArticleSplit(split);
 }

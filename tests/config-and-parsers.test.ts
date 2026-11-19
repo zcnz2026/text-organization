@@ -18,6 +18,11 @@ import {
 } from "../src/catalog/sheet-parsers";
 import { parseGridToScriptDocument } from "../src/engine/csv-sheet";
 import {
+  batchSplitTargetsWithAi,
+  sliceTokensBySpans,
+  tokenizeForIndexing,
+} from "../src/engine/line-splitter";
+import {
   runLanguageExtractionPipeline,
   splitLordsPrayerFullText,
 } from "../src/engine/pipeline";
@@ -933,5 +938,61 @@ describe("Custom SourceScriptColumnConfig remapped columns", () => {
     expect(loc!.isPartial).toBe(true);
     expect(loc!.matchedText).not.toContain("тяжка проблема.");
     expect(loc!.fullParagraphTarget).toContain("Ця спільна проблема");
+  });
+
+  it("batches multiple split tasks via token-index spans with 100% verbatim fidelity", async () => {
+    const rule = resolvePunctuationRule("乌克兰语");
+    const targetText =
+      "Розбещеному характеру людей притаманна спільна проблема — проблема, яка є всередині кожного.";
+    const { tokens, joinSep } = tokenizeForIndexing(targetText);
+    const sliced = sliceTokensBySpans(
+      tokens,
+      joinSep,
+      [{ start: 0, end: 4 }],
+      [makeScriptRow({ rowIndex: 0, line: "452", chinese: "“在人的败坏性情里有个共性的问题，" })],
+      rule,
+    );
+    expect(sliced).toEqual(["Розбещеному характеру людей притаманна спільна"]);
+
+    let apiCalls = 0;
+    const mockGemini = {
+      hasKeys: true,
+      async generateStructuredJson() {
+        apiCalls += 1;
+        return {
+          results: [
+            { id: "blk_1", spans: [{ start: 0, end: 5 }] },
+            { id: "blk_2", spans: [{ start: 0, end: 2 }, { start: 3, end: 5, ellipsis: true }] },
+          ],
+        };
+      },
+    } as never;
+
+    const batchRes = await batchSplitTargetsWithAi(
+      [
+        {
+          id: "blk_1",
+          fallbackText: targetText,
+          aiSourceText: targetText,
+          sourceRows: [makeScriptRow({ rowIndex: 0, line: "452", chinese: "“在人的败坏性情里有个共性的问题，" })],
+        },
+        {
+          id: "blk_2",
+          fallbackText: targetText,
+          aiSourceText: targetText,
+          sourceRows: [
+            makeScriptRow({ rowIndex: 1, line: "453", chinese: "前一半" }),
+            makeScriptRow({ rowIndex: 2, line: "454", chinese: "后一半……", remark: "有省略" }),
+          ],
+        },
+      ],
+      rule,
+      mockGemini,
+    );
+
+    expect(apiCalls).toBe(1);
+    expect(batchRes.get("blk_1")?.usedAi).toBe(true);
+    expect(batchRes.get("blk_1")?.lines).toEqual(["Розбещеному характеру людей притаманна спільна проблема"]);
+    expect(batchRes.get("blk_2")?.lines[1]).toContain(rule.ellipsis);
   });
 });

@@ -2,6 +2,15 @@
 
 All notable changes to **剧本对应语系工作台 (Script Language Matcher)** will be documented in this file.
 
+## [0.2.4] - 2026-11-19
+
+### Added & Improved
+- **AI 词序号精准切分 + 批量打包引擎 (`src/engine/line-splitter.ts`, `src/engine/pipeline.ts`, `src/engine/text-matcher.ts`)**：
+  - 将 AI 输出从“重写外文整段”升级为“仅返回起止词序号 `{start, end}`”，由程序直接从定稿外文原词切片，实现 **100% 物理零改写**（绝不吞掉重音符、撇号或拼错词）并节省约 70% 输出 token。
+  - 超长单篇原段自动按前后 `±18%` 安全上下文窗口裁剪，并附带原段参考英文给 AI 对照，大幅提升「半句截取」「涉及截取」「有省略」语义边界精准度。
+  - 同一语种内的神话、圣经、主祷文分句任务统一在流水线第二阶段按每批最多 6 块打包请求，减少重复系统提示词开销与 API 限流。
+  - 同步兼容无空格语种（日/泰/高棉/缅/老挝）标点感知分块编号。
+
 ## [0.2.3] - 2026-11-19
 
 ### Added & Improved

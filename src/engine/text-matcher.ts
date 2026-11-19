@@ -101,7 +101,14 @@ export function findArticleInCatalog(
 export function locateParagraphInManuscript(
   paragraphs: ArticleParagraph[],
   sourceRows: ScriptRow[],
-): { matchedText: string; fullParagraphTarget: string; isPartial: boolean; truncatedStart: boolean } | null {
+): {
+  matchedText: string;
+  fullParagraphTarget: string;
+  contextWindowTarget: string;
+  fullParagraphEn: string;
+  isPartial: boolean;
+  truncatedStart: boolean;
+} | null {
   if (paragraphs.length === 0 || sourceRows.length === 0) return null;
   const firstRow = sourceRows[0];
   const lastRow = sourceRows[sourceRows.length - 1];
@@ -133,6 +140,7 @@ export function locateParagraphInManuscript(
   }
 
   const combinedTarget = paragraphs.slice(startIdx, endIdx + 1).map((p) => p.target.trim()).filter(Boolean).join(" ");
+  const combinedEn = paragraphs.slice(startIdx, endIdx + 1).map((p) => p.english.trim()).filter(Boolean).join(" ");
   const fullParaZh = normMatchKey(paragraphs[startIdx].chinese);
   const allRowsZh = normMatchKey(sourceRows.map((r) => r.chinese).join(""));
 
@@ -142,9 +150,15 @@ export function locateParagraphInManuscript(
     const endPos = lastZhProbe ? fullParaZh.lastIndexOf(lastZhProbe) : -1;
     const endRatio = endPos >= 0 ? Math.min(1, (endPos + lastZhProbe.length) / Math.max(1, fullParaZh.length)) : Math.min(1, startRatio + allRowsZh.length / Math.max(1, fullParaZh.length));
     if (startRatio > 0.04 || endRatio < 0.94) {
+      const contextWindowTarget =
+        combinedTarget.length > 900
+          ? sliceByClauseRatio(combinedTarget, Math.max(0, startRatio - 0.18), Math.min(1, endRatio + 0.18))
+          : combinedTarget;
       return {
         matchedText: sliceByClauseRatio(combinedTarget, startRatio, endRatio),
         fullParagraphTarget: combinedTarget,
+        contextWindowTarget,
+        fullParagraphEn: combinedEn.length > 900 ? sliceByClauseRatio(combinedEn, Math.max(0, startRatio - 0.18), Math.min(1, endRatio + 0.18)) : combinedEn,
         isPartial: true,
         truncatedStart: Boolean(truncMatch),
       };
@@ -153,6 +167,8 @@ export function locateParagraphInManuscript(
   return {
     matchedText: combinedTarget,
     fullParagraphTarget: combinedTarget,
+    contextWindowTarget: combinedTarget,
+    fullParagraphEn: combinedEn,
     isPartial: false,
     truncatedStart: Boolean(truncMatch),
   };
