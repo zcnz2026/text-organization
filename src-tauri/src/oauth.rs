@@ -254,7 +254,7 @@ pub async fn interactive_login(app: &tauri::AppHandle) -> Result<OAuthSessionInf
     });
     save_vault(&latest)?;
 
-    let ok_html = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<!doctype html><html><body style='font-family:system-ui;text-align:center;padding-top:12vh'><h2>Google 账号授权成功</h2><p>现在可以关闭此页面返回剧本对应语系工作台。</p></body></html>";
+    let ok_html = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<!doctype html><html><body style='font-family:system-ui;text-align:center;padding-top:12vh'><h2>Google 账号授权成功</h2><p>现在可以关闭此页面返回文字整理工具。</p></body></html>";
     let _ = stream.write_all(ok_html.as_bytes()).await;
 
     Ok(build_status(&latest))

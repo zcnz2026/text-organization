@@ -1,9 +1,9 @@
 {
   "name": "text-organization",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "private": true,
   "type": "module",
-  "description": "多语种报道剧本对应语系自动摘录与排版工作台 (Tauri v2 + TypeScript)",
+  "description": "文字整理工具 — 多语种报道剧本自动摘录与排版工具 (Tauri v2 + TypeScript)",
   "scripts": {
     "dev": "node server/main.mjs --dev",
     "start": "npm run build && node server/main.mjs",

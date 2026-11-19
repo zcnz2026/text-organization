@@ -8,5 +8,5 @@ if not exist "node_modules" (
 if not exist "dist\index.html" (
   call npm run build
 )
-echo 正在启动「剧本对应语系工作台」（关闭此黑框将停止后台本地桥接服务）...
+echo 正在启动「文字整理工具」（关闭此黑框将停止后台本地桥接服务）...
 node server/main.mjs

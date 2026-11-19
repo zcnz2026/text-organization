@@ -1,4 +1,4 @@
-# 剧本对应语系工作台 (Script Language Matcher)
+# 文字整理工具
 
 多语种报道剧本自动摘录、逐行时间轴对齐、剧本专用标点转换与 Google 表格分语种写入工具。基于 **Tauri v2 + TypeScript** 构建，支持 **Windows** 与 **macOS** 双系统运行。
 
@@ -34,7 +34,7 @@
 推送版本标签（如 `v0.2.0`）到 GitHub 后，GitHub Actions 会自动在 Releases 页面生成：
 - **Windows**：`.exe` / `.msi` 安装包（双击即用）
 - **macOS**：`.dmg`（通用架构，同时兼容 Apple Silicon M 系列芯片与 Intel Mac）
-  > macOS 首次打开未签名应用如遇拦截，可在终端运行：`xattr -cr "/Applications/剧本对应语系工作台.app"`
+  > macOS 首次打开未签名应用如遇拦截，可在终端运行：`xattr -cr "/Applications/文字整理工具.app"`
 
 ### 方式二：本机免 Rust 秒开模式（开发调试 / 本机有 Node.js）
 - **Windows**：双击 `启动工作台-Windows.bat`（或运行 `npm start`）

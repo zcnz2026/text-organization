@@ -98,7 +98,7 @@ export function downloadConfigTemplateXlsx(): void {
   for (const [k, v] of store.linksByLang.entries()) linksByLang[k] = v;
   const rules = store.availableLanguages.map((l) => resolvePunctuationRule(l, store.customRules));
   const bytes = buildConfigTemplateXlsx({ sourceCols: store.sourceColConfig, sharedSheets: store.sharedSheets, linksByLang, colsByLang: store.colsByLang, rules });
-  triggerXlsxDownload(bytes, "剧本对应语系_标准云端配置表模板.xlsx");
+  triggerXlsxDownload(bytes, "文字整理工具_标准云端配置表模板.xlsx");
 }
 
 export async function loadSampleDemo(): Promise<void> {
@@ -280,5 +280,5 @@ export async function syncReviewedSheetsToCloud(): Promise<void> {
 export function exportCurrentRunsXlsx(): void {
   if (!store.scriptDoc) return;
   const bytes = buildMultiSheetXlsx(store.scriptDoc, [...store.runsByLang.values()], store.sourceColConfig.outputHintCol);
-  triggerXlsxDownload(bytes, `${store.scriptDoc.title || "剧本对应语系"}_多语种摘录.xlsx`);
+  triggerXlsxDownload(bytes, `${store.scriptDoc.title || "文字整理工具"}_多语种摘录.xlsx`);
 }

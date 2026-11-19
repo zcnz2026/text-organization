@@ -7,5 +7,5 @@ fi
 if [ ! -f "dist/index.html" ]; then
   npm run build
 fi
-echo "正在启动「剧本对应语系工作台」..."
+echo "正在启动「文字整理工具」..."
 node server/main.mjs

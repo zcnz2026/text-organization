@@ -68,7 +68,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "剧本对应语系工作台 ${{ github.ref_name }}"
+          releaseName: "文字整理工具 ${{ github.ref_name }}"
           releaseBody: "支持 Windows (.exe/.msi) 与 macOS (.dmg/.app) 双平台原生桌面版。"
           releaseDraft: false
           prerelease: false

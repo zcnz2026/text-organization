@@ -205,7 +205,7 @@ async function startServer() {
   server.listen(requestedPort, "127.0.0.1", () => {
     const addr = server.address();
     const launchUrl = `http://127.0.0.1:${addr.port}/?wb_token=${SESSION_TOKEN}`;
-    console.log(`剧本对应语系工作台已启动: ${launchUrl}`);
+    console.log(`文字整理工具已启动: ${launchUrl}`);
     launchNativeLikeWindow(launchUrl);
   });
 }

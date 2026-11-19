@@ -30,7 +30,7 @@ export function renderHeaderBar(
     <header class="topbar">
       <div class="brand-group">
         <img src="/app-icon.svg" alt="" class="brand-logo" width="24" height="24" />
-        <h1 class="brand-title">剧本对应语系工作台</h1>
+        <h1 class="brand-title">文字整理工具</h1>
         <button
           type="button"
           id="btn-check-update"
