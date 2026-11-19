@@ -98,7 +98,7 @@ export function mountCatalogConfigDialog(
       <div class="config-section-list">
         <div class="config-row-block">
           <div class="col-grid-2">${urlCell("pl-cat-url", "书籍目录与单篇链接 Sheet", lk.articleCatalogUrl, "六本书新摘自 Sheet 链接")}${urlCell("pl-extra-cite", "摘自补充 Sheet", lk.extraCitationSheetUrl ?? "", "额外摘自子表链接（可选）")}</div>
-          ${inpGrid("col-grid-5", [["pl-c1-hr", "目录表头行", lc.catalogHeaderRow, true], ["pl-c1-b", "中括号(B)", lc.catalogZhBracketCol], ["pl-c1-c", "中横线(C)", lc.catalogZhLineCol], ["pl-c1-d", "中文篇名(D)", lc.catalogZhTitleCol], ["pl-c1-e", "英文篇名(E)", lc.catalogEnTitleCol], ["pl-c1-f", "外文篇名(F)", lc.catalogTargetTitleCol], ["pl-c1-g", "单篇链接(G)", lc.catalogDocLinkCol], ["pl-c1-h", "字幕摘自(H)", lc.catalogTargetCiteCol], ["pl-c1-i", "括号摘自(I)", lc.catalogTargetBracketCiteCol || "I"]])}
+          ${inpGrid("col-grid-5", [["pl-c1-hr", "目录表头行", lc.catalogHeaderRow, true], ["pl-c1-b", "中括号(B)", lc.catalogZhBracketCol], ["pl-c1-c", "中横线(C)", lc.catalogZhLineCol], ["pl-c1-d", "中文篇名(D)", lc.catalogZhTitleCol], ["pl-c1-e", "英文篇名(E)", lc.catalogEnTitleCol], ["pl-c1-f", "外文篇名(F)", lc.catalogTargetTitleCol], ["pl-c1-g", "单篇链接(G)", lc.catalogDocLinkCol], ["pl-c1-h", "单行摘自(H)", lc.catalogTargetCiteCol], ["pl-c1-i", "括号摘自(I)", lc.catalogTargetBracketCiteCol || ""], ["pl-c1-sb", "字幕带摘自(可选)", lc.catalogTargetSubtitleBandCiteCol || ""]])}
           ${inpGrid("col-grid-3", [["pl-c2-zh", "单篇.docx 中文列序(1)", lc.manuscriptZhColIndex, true], ["pl-c2-en", "单篇.docx 英文列序(2)", lc.manuscriptEnColIndex, true], ["pl-c2-tg", "单篇.docx 目标列序(3)", lc.manuscriptTargetColIndex, true]])}
         </div>
         <div class="config-row-block">${urlCell("pl-bib-url", "圣经经文库 Sheet", lk.bibleSheetUrl, "唯一圣经库 Sheet 链接 (#gid=...)")}${inpGrid("col-grid-5", [["pl-c3-hr", "表头行", lc.bibleHeaderRow, true], ["pl-c3-b", "章节列(B)", lc.bibleChapterCol], ["pl-c3-c", "中文列(C)", lc.bibleZhCol], ["pl-c3-d", "英文列(D)", lc.bibleEnCol], ["pl-c3-e", "目标语列(E)", lc.bibleTargetCol]])}</div>
@@ -203,8 +203,9 @@ export function mountCatalogConfigDialog(
           catalogEnTitleCol: col("#pl-c1-e", "E"),
           catalogTargetTitleCol: col("#pl-c1-f", "F"),
           catalogDocLinkCol: col("#pl-c1-g", "G"),
-          catalogTargetCiteCol: col("#pl-c1-h", "H"),
-          catalogTargetBracketCiteCol: col("#pl-c1-i", "I"),
+          catalogTargetCiteCol: val("#pl-c1-h").toUpperCase(),
+          catalogTargetBracketCiteCol: val("#pl-c1-i").toUpperCase(),
+          catalogTargetSubtitleBandCiteCol: val("#pl-c1-sb").toUpperCase(),
           manuscriptZhColIndex: num("#pl-c2-zh", 1),
           manuscriptEnColIndex: num("#pl-c2-en", 2),
           manuscriptTargetColIndex: num("#pl-c2-tg", 3),

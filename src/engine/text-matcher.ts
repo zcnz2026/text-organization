@@ -276,9 +276,10 @@ export function resolveCitationText(
 
   const article = findArticleInCatalog(catalog.articles, row.filterCategory || row.chinese, row.chinese, row.english);
   if (article) {
-    const picked = variant === "video_effect"
-      ? article.targetBracketCite || article.targetCite
-      : article.targetCite || article.targetBracketCite;
+    const picked =
+      variant === "video_effect"
+        ? article.targetBracketCite || article.targetCite || article.targetSubtitleBandCite
+        : article.targetSubtitleBandCite || article.targetCite || article.targetBracketCite;
     if (picked) return picked;
   }
 

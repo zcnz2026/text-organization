@@ -58,7 +58,7 @@ function buildSourcePair(scope: string, s: SourceScriptColumnConfig): TableRowPa
 
 function buildPerLangPairs(scope: string, c: PerLanguageSheetColumnConfig): TableRowPair[] {
   return [
-    makePair(scope, "六本书新摘自", ["表头行", "中文括号摘自", "中文字幕带摘自", "中文篇目", "英文篇目", "外文篇目", "神话单篇链接", "外文单行摘自", "外文括号摘自"], [String(c.catalogHeaderRow), c.catalogZhBracketCol, c.catalogZhLineCol, c.catalogZhTitleCol, c.catalogEnTitleCol, c.catalogTargetTitleCol, c.catalogDocLinkCol, c.catalogTargetCiteCol, c.catalogTargetBracketCiteCol]),
+    makePair(scope, "六本书新摘自", ["表头行", "中文括号摘自", "中文字幕带摘自", "中文篇目", "英文篇目", "外文篇目", "神话单篇链接", "外文单行摘自", "外文括号摘自", "外文字幕带摘自(无留空)"], [String(c.catalogHeaderRow), c.catalogZhBracketCol, c.catalogZhLineCol, c.catalogZhTitleCol, c.catalogEnTitleCol, c.catalogTargetTitleCol, c.catalogDocLinkCol, c.catalogTargetCiteCol, c.catalogTargetBracketCiteCol, c.catalogTargetSubtitleBandCiteCol]),
     makePair(scope, "单篇神话文档", ["固定填1", "中文列序号", "英文列序号", "外文列序号"], ["1", String(c.manuscriptZhColIndex), String(c.manuscriptEnColIndex), String(c.manuscriptTargetColIndex)]),
     makePair(scope, "圣经经文库", ["表头行", "英文章节", "中文经文", "英文经文", "外文经文"], [String(c.bibleHeaderRow), c.bibleChapterCol, c.bibleZhCol, c.bibleEnCol, c.bibleTargetCol]),
     makePair(scope, "新俗语表", ["表头行", "中文", "最新英文", "对应英文", "外文"], [String(c.idiomHeaderRow), c.idiomZhCol, c.idiomEn1Col, c.idiomEn2Col, c.idiomTargetCol]),
@@ -288,6 +288,7 @@ function applyColumnRow(
     patch.catalogDocLinkCol = optColVal(vals[6], defaultLangCols.catalogDocLinkCol);
     patch.catalogTargetCiteCol = optColVal(vals[7], defaultLangCols.catalogTargetCiteCol);
     patch.catalogTargetBracketCiteCol = optColVal(vals[8], defaultLangCols.catalogTargetBracketCiteCol);
+    patch.catalogTargetSubtitleBandCiteCol = optColVal(vals[9], defaultLangCols.catalogTargetSubtitleBandCiteCol);
   } else if (t.includes("单篇") || t.includes("神话文档")) {
     patch.manuscriptZhColIndex = intVal(vals[1], defaultLangCols.manuscriptZhColIndex);
     patch.manuscriptEnColIndex = intVal(vals[2], defaultLangCols.manuscriptEnColIndex);

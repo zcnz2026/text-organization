@@ -23,6 +23,7 @@ export interface ArticleCatalogEntry {
   zhBracketCite: string;
   targetCite: string;
   targetBracketCite?: string;
+  targetSubtitleBandCite?: string;
 }
 
 export interface ArticleParagraph {

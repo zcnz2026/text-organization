@@ -72,6 +72,7 @@ export function parseArticleCatalogSheet(
   let colLink = optColIdx(m.catalogDocLinkCol, 6);
   let colTargetCite = optColIdx(m.catalogTargetCiteCol, 7);
   let colTargetBracketCite = optColIdx(m.catalogTargetBracketCiteCol, 8);
+  const colTargetSubtitleBand = optColIdx(m.catalogTargetSubtitleBandCiteCol, -1);
 
   const headerIdx = Math.max(0, (m.catalogHeaderRow || 1) - 1);
   if (!cfg) {
@@ -93,6 +94,7 @@ export function parseArticleCatalogSheet(
     const docUrl = urlOf(grid, r, colLink);
     const targetCite = txt(grid, r, colTargetCite);
     const targetBracketCite = txt(grid, r, colTargetBracketCite);
+    const targetSubtitleBandCite = txt(grid, r, colTargetSubtitleBand);
     if (!zhTitle && !enTitle && !targetTitle) continue;
     entries.push({
       zhTitle,
@@ -103,6 +105,7 @@ export function parseArticleCatalogSheet(
       zhBracketCite,
       targetCite,
       ...(targetBracketCite ? { targetBracketCite } : {}),
+      ...(targetSubtitleBandCite ? { targetSubtitleBandCite } : {}),
     });
   }
   return entries;

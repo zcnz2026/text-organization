@@ -60,6 +60,7 @@ export interface PerLanguageSheetColumnConfig {
   catalogDocLinkCol: string;
   catalogTargetCiteCol: string;
   catalogTargetBracketCiteCol: string;
+  catalogTargetSubtitleBandCiteCol: string;
 
   manuscriptZhColIndex: number;
   manuscriptEnColIndex: number;
@@ -151,6 +152,7 @@ export const DEFAULT_LANG_SHEET_COLS: PerLanguageSheetColumnConfig = {
   catalogDocLinkCol: "G",
   catalogTargetCiteCol: "H",
   catalogTargetBracketCiteCol: "I",
+  catalogTargetSubtitleBandCiteCol: "",
 
   manuscriptZhColIndex: 1,
   manuscriptEnColIndex: 2,

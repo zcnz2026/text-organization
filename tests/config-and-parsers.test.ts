@@ -780,18 +780,19 @@ describe("Custom SourceScriptColumnConfig remapped columns", () => {
         [
           CONFIG_TEMPLATE_SHEET_NAMES.cols,
           toRichGrid([
-            ["语系", "表格名称", "表头行", "列1", "列2", "列3", "列4", "列5", "列6", "列7", "列8"],
-            ["印尼语(说明)", "六本书新摘自", "表头行", "中文括号摘自", "中文字幕带摘自", "中文篇目", "英文篇目", "外文篇目", "神话单篇链接", "外文单行摘自", "外文括号摘自"],
-            ["印尼语", "六本书新摘自", "1", "B", "C", "", "D", "E", "F", "G", "H"],
+            ["语系", "表格名称", "表头行", "列1", "列2", "列3", "列4", "列5", "列6", "列7", "列8", "列9"],
+            ["印尼语(说明)", "六本书新摘自", "表头行", "中文括号摘自", "中文字幕带摘自", "中文篇目", "英文篇目", "外文篇目", "神话单篇链接", "外文单行摘自", "外文括号摘自", "外文字幕带摘自"],
+            ["印尼语", "六本书新摘自", "1", "B", "C", "", "D", "E", "F", "G", "H", "I"],
           ]),
         ],
       ]),
     );
     expect(cfg.colsByLang["印尼语"].catalogZhTitleCol).toBe("");
     expect(cfg.colsByLang["印尼语"].catalogDocLinkCol).toBe("F");
+    expect(cfg.colsByLang["印尼语"].catalogTargetSubtitleBandCiteCol).toBe("I");
 
     const idCatalogGrid = toRichGrid([
-      ["", "中文括号版摘自", "中文单独一行的摘自", "英语新标题", "印尼标题", "神话单篇稿链接", "单独一行+书名的摘自", "括号版+书名的摘自"],
+      ["", "中文括号版摘自", "中文单独一行的摘自", "英语新标题", "印尼标题", "神话单篇稿链接", "单独一行+书名的摘自", "括号版+书名的摘自", "字幕带用的摘自"],
       [
         "",
         "《话・卷一　神的显现与作工・道成肉身的神的职分与人的本分的区别》",
@@ -801,6 +802,7 @@ describe("Custom SourceScriptColumnConfig remapped columns", () => {
         { text: "https://docs.google.com/document/d/id_doc_362", url: "https://docs.google.com/document/d/id_doc_362" },
         "—Firman, Jilid 1. Penampakan dan Pekerjaan Tuhan",
         "(Firman, Jilid 1. Penampakan dan Pekerjaan Tuhan)",
+        "Dikutip dari Firman, Jilid 1. Penampakan dan Pekerjaan Tuhan",
       ],
     ]);
     const entries = parseArticleCatalogSheet(idCatalogGrid, cfg.colsByLang["印尼语"]);
@@ -809,5 +811,6 @@ describe("Custom SourceScriptColumnConfig remapped columns", () => {
     expect(entries[0].docUrl).toBe("https://docs.google.com/document/d/id_doc_362");
     expect(entries[0].targetCite).toContain("—Firman");
     expect(entries[0].targetBracketCite).toContain("(Firman");
+    expect(entries[0].targetSubtitleBandCite).toContain("Dikutip dari Firman");
   });
 });
