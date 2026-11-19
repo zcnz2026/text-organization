@@ -162,9 +162,9 @@ export function locateParagraphInManuscript(
         ? Math.min(1, (endPos + lastZhProbe.length) / Math.max(1, fullSpanZh.length))
         : Math.min(1, startRatio + allRowsZh.length / Math.max(1, fullSpanZh.length));
     if (startRatio > 0.04 || endRatio < 0.94) {
-      const margin = combinedTarget.length > 2400 ? 0.08 : 0.16;
+      const margin = combinedTarget.length > 6000 ? 0.12 : 0.18;
       const contextWindowTarget =
-        combinedTarget.length > 900
+        combinedTarget.length > 4000
           ? sliceByClauseRatio(combinedTarget, Math.max(0, startRatio - margin), Math.min(1, endRatio + margin))
           : combinedTarget;
       return {
@@ -172,7 +172,7 @@ export function locateParagraphInManuscript(
         fullParagraphTarget: combinedTarget,
         contextWindowTarget,
         fullParagraphEn:
-          combinedEn.length > 900
+          combinedEn.length > 4000
             ? sliceByClauseRatio(combinedEn, Math.max(0, startRatio - margin), Math.min(1, endRatio + margin))
             : combinedEn,
         isPartial: true,

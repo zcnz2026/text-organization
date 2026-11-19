@@ -282,13 +282,13 @@ export async function batchSplitTargetsWithAi(
     return resultMap;
   }
 
-  // Pack up to 6 blocks (<= 14k chars) per API request to save system prompt tokens
+  // Pack up to 6 blocks (<= 36k chars) per API request to accommodate long passages comfortably
   const batches: BatchSplitRequest[][] = [];
   let curBatch: BatchSplitRequest[] = [];
   let curChars = 0;
   for (const req of requests) {
-    const est = req.aiSourceText.length + (req.referenceEn?.length ?? 0) + req.sourceRows.length * 100;
-    if (curBatch.length >= 6 || (curBatch.length > 0 && curChars + est > 14000)) {
+    const est = req.aiSourceText.length + (req.referenceEn?.length ?? 0) + req.sourceRows.length * 120;
+    if (curBatch.length >= 6 || (curBatch.length > 0 && curChars + est > 36000)) {
       batches.push(curBatch);
       curBatch = [];
       curChars = 0;
