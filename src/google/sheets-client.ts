@@ -27,9 +27,11 @@ export class GoogleSheetsClient {
   private getToken: TokenProvider;
   private fetchFn: typeof fetch;
 
-  constructor(getToken: TokenProvider, fetchFn: typeof fetch = fetch) {
+  constructor(getToken: TokenProvider, fetchFn?: typeof fetch) {
     this.getToken = getToken;
-    this.fetchFn = fetchFn;
+    this.fetchFn = fetchFn
+      ? (input, init) => fetchFn(input, init)
+      : (input, init) => globalThis.fetch(input, init);
   }
 
   private async request<T>(url: string, init?: RequestInit): Promise<T> {

@@ -34,7 +34,9 @@ export class GeminiPoolClient {
     this.keys = opts.apiKeys.map((k) => k.trim()).filter(Boolean);
     this.model = opts.model;
     this.rotation = opts.rotation;
-    this.fetchFn = opts.fetchFn ?? fetch;
+    this.fetchFn = opts.fetchFn
+      ? (input, init) => opts.fetchFn!(input, init)
+      : (input, init) => globalThis.fetch(input, init);
   }
 
   get hasKeys(): boolean {
