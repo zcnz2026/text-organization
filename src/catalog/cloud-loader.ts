@@ -4,6 +4,7 @@ import type {
 } from "../google/docs-client";
 import type { GoogleSheetsClient } from "../google/sheets-client";
 import { parseGoogleResourceUrl } from "../google/url-parser";
+import { diagLog } from "../platform/diag-log";
 import type { LanguageResourceLinks, PunctuationRule } from "../types/domain";
 import {
   type CloudWorkspaceConfig,
@@ -264,27 +265,39 @@ export class CloudCatalogLoader {
       sharedCfg,
     );
 
+    const citations = [
+      ...commonA.citations,
+      ...commonB.citations,
+      ...wordCites,
+      ...hymnCites,
+    ];
+    const articles = parseArticleCatalogSheet(articleGrid, opts?.langCols);
+    const bibleEntries = parseBibleLibrarySheet(bibleGrid, opts?.langCols);
+    const idioms = parseIdiomGlossarySheet(idiomGrid, opts?.langCols);
+    const hymns = parseHymnSheet(hymnGrid, langCols);
+    const rosterEntries = parseRosterSheet(rosterGrid, links.langName, sharedCfg);
+
+    diagLog.info(
+      "资料库加载",
+      `[${links.langName}] 目录 ${articles.length} 篇 / 圣经 ${bibleEntries.length} 条 / 俗语 ${idioms.length} 条 / 诗歌 ${hymns.length} 首 / 摘自 ${citations.length} 条`,
+    );
+
     return {
       langName: links.langName,
       rule,
       godSaysText: commonB.godSaysText || commonA.godSaysText,
       commonFixedTerms: mergedFixed,
-      citations: [
-        ...commonA.citations,
-        ...commonB.citations,
-        ...wordCites,
-        ...hymnCites,
-      ],
-      articles: parseArticleCatalogSheet(articleGrid, opts?.langCols),
+      citations,
+      articles,
       articleDocsCache: new Map(),
-      bibleEntries: parseBibleLibrarySheet(bibleGrid, opts?.langCols),
-      idioms: parseIdiomGlossarySheet(idiomGrid, opts?.langCols),
-      hymns: parseHymnSheet(hymnGrid, langCols),
+      bibleEntries,
+      idioms,
+      hymns,
       lordsPrayer: parsedPrayer.lines,
       ...(parsedPrayer.fullText
         ? { lordsPrayerFullText: parsedPrayer.fullText }
         : {}),
-      rosterEntries: parseRosterSheet(rosterGrid, links.langName, sharedCfg),
+      rosterEntries,
     };
   }
 }

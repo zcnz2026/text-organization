@@ -96,7 +96,7 @@ export class GeminiPoolClient {
       generationConfig: {
         temperature: 0.1,
         responseMimeType: "application/json",
-        responseJsonSchema: input.jsonSchema,
+        responseSchema: input.jsonSchema,
       },
     };
 
@@ -107,7 +107,15 @@ export class GeminiPoolClient {
     });
 
     if (!resp.ok) {
-      throw new Error(`Gemini HTTP ${resp.status}`);
+      const rawErr = await resp.text().catch(() => "");
+      let detail = "";
+      try {
+        const j = JSON.parse(rawErr) as { error?: { message?: string; status?: string } };
+        detail = j.error?.message || j.error?.status || rawErr.slice(0, 180);
+      } catch {
+        detail = rawErr.slice(0, 180);
+      }
+      throw new Error(`Gemini HTTP ${resp.status}${detail ? `: ${detail}` : ""}`);
     }
 
     const data = (await resp.json()) as {
