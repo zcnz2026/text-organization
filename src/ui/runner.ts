@@ -10,6 +10,7 @@ import { GoogleDocsClient } from "../google/docs-client";
 import { GoogleSheetsClient } from "../google/sheets-client";
 import { parseGoogleResourceUrl } from "../google/url-parser";
 import { hostBridge } from "../platform/bridge";
+import { diagLog } from "../platform/diag-log";
 import type { LanguageResourceLinks } from "../types/domain";
 import type { CloudWorkspaceConfig } from "../types/schema-config";
 import { createSyntheticDemoState } from "./demo-fixture";
@@ -62,7 +63,11 @@ function startBusy(pct: number, text: string): void {
 }
 
 function finishBusy(err?: unknown): void {
-  if (err !== undefined) store.notice = { type: "error", message: err instanceof Error ? err.message : String(err) };
+  if (err !== undefined) {
+    const msg = err instanceof Error ? err.message : String(err);
+    diagLog.error("Workbench", msg, err instanceof Error ? err.stack : undefined);
+    store.notice = { type: "error", message: msg };
+  }
   store.busy = false;
   store.progressPercent = 0;
   store.progressText = "";

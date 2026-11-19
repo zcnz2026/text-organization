@@ -1,4 +1,5 @@
 import type { RichSheetGrid } from "../catalog/catalog-types";
+import { diagLog } from "../platform/diag-log";
 import type {
   LanguageRunOutput,
   ScriptSheetDocument,
@@ -46,9 +47,10 @@ export class GoogleSheetsClient {
     });
     if (!resp.ok) {
       const detail = await resp.text().catch(() => "");
+      diagLog.error("Google Sheets API", `HTTP ${resp.status} ${url.split("?")[0]}`, detail.slice(0, 400));
       if (resp.status === 401 || resp.status === 403) {
         throw new Error(
-          `Google 表格权限不足或授权已过期 (HTTP ${resp.status})，请确认当前登录邮箱拥有该表格访问权限`,
+          `Google 表格权限不足或授权已过期 (HTTP ${resp.status})，请确认当前登录邮箱拥有该表格访问权限。详情: ${detail.slice(0, 140)}`,
         );
       }
       throw new Error(`Google Sheets 请求失败 (HTTP ${resp.status}): ${detail.slice(0, 160)}`);

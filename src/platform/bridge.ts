@@ -87,4 +87,8 @@ export const hostBridge = {
   getPlainGeminiKeys(): Promise<string[]> {
     return callHost<string[]>("get_plain_gemini_keys");
   },
+
+  appendDiagLog(line: string): Promise<{ ok: boolean }> {
+    return callHost<{ ok: boolean }>("append_diag_log", { line });
+  },
 };

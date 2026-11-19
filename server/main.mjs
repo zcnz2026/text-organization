@@ -62,6 +62,17 @@ async function dispatchApi(cmd, body) {
   if (cmd === "get_plain_gemini_keys") {
     return readVault().geminiKeys || [];
   }
+  if (cmd === "append_diag_log") {
+    const logDir = path.resolve(process.cwd(), "logs");
+    fs.mkdirSync(logDir, { recursive: true });
+    const safeLine = String(body.line || "")
+      .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]")
+      .replace(/\bya29\.[A-Za-z0-9._-]+/g, "[REDACTED_TOKEN]")
+      .replace(/\bAIza[0-9A-Za-z_-]{20,}/g, "[REDACTED_API_KEY]")
+      .slice(0, 2000);
+    fs.appendFileSync(path.join(logDir, "workbench.log"), `${safeLine}\n`, "utf8");
+    return { ok: true };
+  }
   throw new Error(`未知接口命令: ${cmd}`);
 }
 

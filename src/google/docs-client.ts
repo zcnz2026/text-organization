@@ -1,9 +1,43 @@
 import type { ArticleParagraph } from "../catalog/catalog-types";
+import { diagLog } from "../platform/diag-log";
 import {
   extractDocumentXmlFromDocxBytes,
   parseDocxDocumentXml,
 } from "./docx-drive-client";
 import type { TokenProvider } from "./sheets-client";
+
+function formatGoogleApi403Message(apiLabel: string, resourceId: string, status: number, rawBody: string): string {
+  let apiMessage = "";
+  let reason = "";
+  try {
+    const parsed = JSON.parse(rawBody) as {
+      error?: {
+        message?: string;
+        status?: string;
+        errors?: Array<{ reason?: string; message?: string }>;
+        details?: Array<{ reason?: string }>;
+      };
+    };
+    apiMessage = parsed.error?.message ?? "";
+    reason =
+      parsed.error?.details?.find((d) => d.reason)?.reason ??
+      parsed.error?.errors?.[0]?.reason ??
+      parsed.error?.status ??
+      "";
+  } catch {
+    apiMessage = rawBody.slice(0, 200);
+  }
+
+  diagLog.error(apiLabel, `HTTP ${status} (id=${resourceId}, reason=${reason || "unknown"})`, apiMessage || rawBody.slice(0, 300));
+
+  if (/SERVICE_DISABLED|has not been used in project|is disabled/i.test(`${reason} ${apiMessage}`)) {
+    return `${apiLabel}尚未在您的 Google Cloud 项目中启用 (HTTP ${status})，请在 Google Cloud 控制台启用 ${apiLabel} 后重试。原始信息: ${apiMessage.slice(0, 140)}`;
+  }
+  if (/ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient.*scope|insufficientPermissions/i.test(`${reason} ${apiMessage}`)) {
+    return `当前 Google 登录令牌权限范围不足 (HTTP ${status})，请点击右上角「退出登录」后重新授权，并在 Google 授权页勾选全部权限复选框。原始信息: ${apiMessage.slice(0, 140)}`;
+  }
+  return `${apiLabel}读取失败 (HTTP ${status}, 文档ID: ${resourceId})：${apiMessage.slice(0, 180) || "无权访问该文档，请确认当前登录邮箱对该单篇文档拥有查看权限"}`;
+}
 
 interface DocStructuralElement {
   paragraph?: {
@@ -74,10 +108,12 @@ export class GoogleDocsClient {
     }
 
     if (resp.status === 400 || resp.status === 404 || resp.status === 415) {
+      diagLog.info("Google Docs API", `文档 ${documentId} 非原生 Docs (HTTP ${resp.status})，尝试按 Drive .docx 下载`);
       return this.fetchDriveDocxParagraphs(documentId, token, cols);
     }
 
-    throw new Error(`单篇文档读取失败 (HTTP ${resp.status})`);
+    const rawBody = await resp.text().catch(() => "");
+    throw new Error(formatGoogleApi403Message("Google Docs API", documentId, resp.status, rawBody));
   }
 
   private parseNativeDocBody(
@@ -122,9 +158,8 @@ export class GoogleDocsClient {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!resp.ok) {
-      throw new Error(
-        `云端硬盘 .docx 单篇下载失败 (HTTP ${resp.status})，请确认已开启 Google Drive API 并重新点击授权登录`,
-      );
+      const rawBody = await resp.text().catch(() => "");
+      throw new Error(formatGoogleApi403Message("Google Drive API (.docx)", fileId, resp.status, rawBody));
     }
     const buf = new Uint8Array(await resp.arrayBuffer());
     const xml = await extractDocumentXmlFromDocxBytes(buf);

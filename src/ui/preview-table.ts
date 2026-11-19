@@ -1,4 +1,5 @@
 import { classifyScriptTasks } from "../engine/classifier";
+import { diagLog } from "../platform/diag-log";
 import type { ProcessedRowResult } from "../types/domain";
 import { icons } from "./icons";
 import { notifyStateChanged, type RowFilterMode, store } from "./state";
@@ -44,7 +45,10 @@ export function renderPreviewStage(
     ? `
       <div class="notice-bar ${store.notice.type === "error" ? "notice-error" : "notice-info"}" role="status">
         <span>${esc(store.notice.message)}</span>
-        <button type="button" id="btn-dismiss-notice" class="seg-option" aria-label="关闭提示">关闭</button>
+        <div style="display:flex;gap:0.35rem;flex-shrink:0">
+          ${store.notice.type === "error" ? '<button type="button" id="btn-export-diag" class="seg-option">导出日志</button>' : ""}
+          <button type="button" id="btn-dismiss-notice" class="seg-option" aria-label="关闭提示">关闭</button>
+        </div>
       </div>
     `
     : "";
@@ -70,6 +74,9 @@ export function renderPreviewStage(
         </div>
       </main>
     `;
+    container
+      .querySelector("#btn-export-diag")
+      ?.addEventListener("click", () => diagLog.downloadLogFile());
     container
       .querySelector("#btn-dismiss-notice")
       ?.addEventListener("click", () => {
@@ -242,6 +249,10 @@ export function renderPreviewStage(
   `;
 
   container.querySelectorAll<HTMLElement>('[role="tablist"]').forEach(wireTablistArrowKeys);
+
+  container
+    .querySelector("#btn-export-diag")
+    ?.addEventListener("click", () => diagLog.downloadLogFile());
 
   container
     .querySelector("#btn-dismiss-notice")
