@@ -68,6 +68,8 @@ export function parseDocxDocumentXml(
   return results;
 }
 
+const MAX_DOCX_XML_BYTES = 32 * 1024 * 1024;
+
 async function inflateRawBytes(compressed: Uint8Array): Promise<Uint8Array> {
   const ds = new DecompressionStream("deflate-raw");
   const writer = ds.writable.getWriter();
@@ -82,8 +84,12 @@ async function inflateRawBytes(compressed: Uint8Array): Promise<Uint8Array> {
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    chunks.push(value);
     total += value.byteLength;
+    if (total > MAX_DOCX_XML_BYTES) {
+      await reader.cancel();
+      throw new Error(".docx 文档解压体积超过安全上限 (32MB)");
+    }
+    chunks.push(value);
   }
   const out = new Uint8Array(total);
   let pos = 0;
@@ -133,9 +139,15 @@ export async function extractDocumentXmlFromDocxBytes(
     cdOffset += 46 + nameLen + extraLen + commentLen;
 
     if (fileName === "word/document.xml") {
+      if (localHeaderOffset + 30 > zipBytes.byteLength) {
+        throw new Error("无效的 .docx 偏移量");
+      }
       const localNameLen = view.getUint16(localHeaderOffset + 26, true);
       const localExtraLen = view.getUint16(localHeaderOffset + 28, true);
       const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
+      if (dataStart < 0 || dataStart + compSize > zipBytes.byteLength) {
+        throw new Error("无效的 .docx 数据边界");
+      }
       const rawSlice = zipBytes.subarray(dataStart, dataStart + compSize);
       if (method === 0) {
         return dec.decode(rawSlice);

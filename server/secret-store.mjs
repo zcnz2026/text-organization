@@ -16,26 +16,28 @@ function ensureDir() {
 
 function dpapiProtect(plainText) {
   const b64In = Buffer.from(plainText, "utf8").toString("base64");
-  const ps = `
-    Add-Type -AssemblyName System.Security;
-    $bytes = [Convert]::FromBase64String('${b64In}');
-    $enc = [Security.Cryptography.ProtectedData]::Protect($bytes, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser);
-    [Convert]::ToBase64String($enc)
-  `;
+  const ps =
+    "Add-Type -AssemblyName System.Security; " +
+    "$b64 = [Console]::In.ReadToEnd().Trim(); " +
+    "$bytes = [Convert]::FromBase64String($b64); " +
+    "$enc = [Security.Cryptography.ProtectedData]::Protect($bytes, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser); " +
+    "[Convert]::ToBase64String($enc)";
   return execFileSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", ps], {
+    input: b64In,
     encoding: "utf8",
   }).trim();
 }
 
 function dpapiUnprotect(b64Cipher) {
   const clean = b64Cipher.replace(/[^A-Za-z0-9+/=]/g, "");
-  const ps = `
-    Add-Type -AssemblyName System.Security;
-    $enc = [Convert]::FromBase64String('${clean}');
-    $dec = [Security.Cryptography.ProtectedData]::Unprotect($enc, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser);
-    [Text.Encoding]::UTF8.GetString($dec)
-  `;
+  const ps =
+    "Add-Type -AssemblyName System.Security; " +
+    "$b64 = [Console]::In.ReadToEnd().Trim(); " +
+    "$enc = [Convert]::FromBase64String($b64); " +
+    "$dec = [Security.Cryptography.ProtectedData]::Unprotect($enc, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser); " +
+    "[Text.Encoding]::UTF8.GetString($dec)";
   return execFileSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", ps], {
+    input: clean,
     encoding: "utf8",
   });
 }

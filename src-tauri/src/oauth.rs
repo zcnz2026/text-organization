@@ -60,6 +60,20 @@ pub fn build_status(vault: &SecretVault) -> OAuthSessionInfo {
     }
 }
 
+fn assert_google_oauth_uri(raw: Option<String>, fallback: &str) -> Result<String, String> {
+    let candidate = raw.unwrap_or_else(|| fallback.to_string());
+    let parsed = Url::parse(candidate.trim()).map_err(|_| "无效的 OAuth 端点 URL".to_string())?;
+    let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
+    let allowed = matches!(
+        host.as_str(),
+        "accounts.google.com" | "oauth2.googleapis.com" | "www.googleapis.com"
+    );
+    if parsed.scheme() != "https" || !allowed {
+        return Err(format!("不受信任的 OAuth 端点域名: {host}，仅允许 Google 官方 HTTPS 域名"));
+    }
+    Ok(parsed.to_string())
+}
+
 pub fn store_client_json(raw_json: &str) -> Result<OAuthSessionInfo, String> {
     let parsed: RawOAuthWrapper =
         serde_json::from_str(raw_json).map_err(|_| "无效的 OAuth 2.0 JSON 文件".to_string())?;
@@ -90,12 +104,14 @@ pub fn store_client_json(raw_json: &str) -> Result<OAuthSessionInfo, String> {
     vault.oauth_client = Some(StoredOAuthClient {
         client_id,
         client_secret,
-        auth_uri: node
-            .auth_uri
-            .unwrap_or_else(|| "https://accounts.google.com/o/oauth2/v2/auth".to_string()),
-        token_uri: node
-            .token_uri
-            .unwrap_or_else(|| "https://oauth2.googleapis.com/token".to_string()),
+        auth_uri: assert_google_oauth_uri(
+            node.auth_uri,
+            "https://accounts.google.com/o/oauth2/v2/auth",
+        )?,
+        token_uri: assert_google_oauth_uri(
+            node.token_uri,
+            "https://oauth2.googleapis.com/token",
+        )?,
     });
     if changed {
         vault.oauth_tokens = None;

@@ -1,6 +1,6 @@
 {
   "name": "text-organization",
-  "version": "0.1.0",
+  "version": "0.2.5",
   "private": true,
   "type": "module",
   "description": "多语种报道剧本对应语系自动摘录与排版工作台 (Tauri v2 + TypeScript)",
@@ -23,7 +23,7 @@
     "@tauri-apps/cli": "^2.5.0",
     "@types/node": "^22.15.0",
     "typescript": "^5.8.3",
-    "vite": "^6.3.5",
+    "vite": "^6.4.6",
     "vitest": "^3.1.4"
   }
 }

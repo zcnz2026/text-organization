@@ -1,6 +1,6 @@
 [package]
 name = "text-organization"
-version = "0.1.0"
+version = "0.2.5"
 description = "剧本对应语系工作台"
 authors = ["zcnz2026"]
 edition = "2021"

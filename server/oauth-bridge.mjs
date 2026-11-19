@@ -10,16 +10,44 @@ const OAUTH_SCOPES = [
   "https://www.googleapis.com/auth/userinfo.email",
 ].join(" ");
 
+const ALLOWED_GOOGLE_OAUTH_HOSTS = new Set([
+  "accounts.google.com",
+  "oauth2.googleapis.com",
+  "www.googleapis.com",
+]);
+
+function escHtml(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function assertSafeGoogleOAuthUri(rawUrl, fallback) {
+  const candidate = String(rawUrl || fallback).trim();
+  const parsed = new URL(candidate);
+  if (parsed.protocol !== "https:" || !ALLOWED_GOOGLE_OAUTH_HOSTS.has(parsed.hostname.toLowerCase())) {
+    throw new Error(`不受信任的 OAuth 端点地址: ${parsed.hostname}，仅允许 Google 官方 HTTPS 域名`);
+  }
+  return parsed.toString();
+}
+
 export function openExternalUrl(url) {
+  const parsed = new URL(String(url || ""));
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error(`拒绝打开非 HTTP(S) 协议链接: ${parsed.protocol}`);
+  }
+  const safeUrl = parsed.toString();
   if (process.platform === "win32") {
-    spawn("rundll32", ["url.dll,FileProtocolHandler", url], {
+    spawn("rundll32", ["url.dll,FileProtocolHandler", safeUrl], {
       detached: true,
       stdio: "ignore",
     }).unref();
   } else if (process.platform === "darwin") {
-    spawn("open", [url], { detached: true, stdio: "ignore" }).unref();
+    spawn("open", [safeUrl], { detached: true, stdio: "ignore" }).unref();
   } else {
-    spawn("xdg-open", [url], { detached: true, stdio: "ignore" }).unref();
+    spawn("xdg-open", [safeUrl], { detached: true, stdio: "ignore" }).unref();
   }
 }
 
@@ -37,8 +65,8 @@ export function parseOAuthClientJson(rawJson) {
   return {
     clientId: String(node.client_id).trim(),
     clientSecret: String(node.client_secret).trim(),
-    authUri: String(node.auth_uri || "https://accounts.google.com/o/oauth2/v2/auth"),
-    tokenUri: String(node.token_uri || "https://oauth2.googleapis.com/token"),
+    authUri: assertSafeGoogleOAuthUri(node.auth_uri, "https://accounts.google.com/o/oauth2/v2/auth"),
+    tokenUri: assertSafeGoogleOAuthUri(node.token_uri, "https://oauth2.googleapis.com/token"),
   };
 }
 
@@ -147,7 +175,7 @@ export async function runInteractiveOAuthLogin() {
 
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         res.end(
-          `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>授权成功</title><style>body{font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:85vh;background:#f5f7f9;color:#111827}.box{background:#fff;padding:32px 40px;border-radius:14px;border:1px solid #d8e0e8;text-align:center}h2{margin:0 0 8px;color:#0e5a6d}p{margin:0;color:#4b5563}</style></head><body><div class="box"><h2>Google 账号授权成功</h2><p>${email ? `已连接邮箱：${email}，` : ""}现在可以关闭此标签页返回剧本工作台。</p></div></body></html>`,
+          `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>授权成功</title><style>body{font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:85vh;background:#f5f7f9;color:#111827}.box{background:#fff;padding:32px 40px;border-radius:14px;border:1px solid #d8e0e8;text-align:center}h2{margin:0 0 8px;color:#0e5a6d}p{margin:0;color:#4b5563}</style></head><body><div class="box"><h2>Google 账号授权成功</h2><p>${email ? `已连接邮箱：${escHtml(email)}，` : ""}现在可以关闭此标签页返回剧本工作台。</p></div></body></html>`,
         );
         server.close();
         resolve(buildAuthStatus(latest));

@@ -70,6 +70,11 @@ fn get_plain_gemini_keys() -> Vec<String> {
     load_vault().gemini_keys
 }
 
+#[tauri::command]
+fn append_diag_log(_line: String) -> serde_json::Value {
+    serde_json::json!({ "ok": true })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -82,7 +87,8 @@ pub fn run() {
             get_valid_access_token,
             get_gemini_key_summary,
             save_gemini_keys,
-            get_plain_gemini_keys
+            get_plain_gemini_keys,
+            append_diag_log
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

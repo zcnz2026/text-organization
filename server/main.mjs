@@ -106,6 +106,24 @@ function launchNativeLikeWindow(url) {
   openExternalUrl(url);
 }
 
+const MAX_API_BODY_BYTES = 2 * 1024 * 1024;
+
+function isTokenEqual(a, b) {
+  const ba = Buffer.from(String(a || ""), "utf8");
+  const bb = Buffer.from(String(b || ""), "utf8");
+  return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
+}
+
+function isAllowedLocalOrigin(originHeader) {
+  if (!originHeader) return true;
+  try {
+    const u = new URL(originHeader);
+    return u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost");
+  } catch {
+    return false;
+  }
+}
+
 async function startServer() {
   const isDev = process.argv.includes("--dev");
   let vite = null;
@@ -121,14 +139,23 @@ async function startServer() {
     const url = new URL(req.url || "/", "http://127.0.0.1");
 
     if (url.pathname.startsWith("/api/") && req.method === "POST") {
-      if (req.headers["x-workbench-token"] !== SESSION_TOKEN) {
+      if (!isAllowedLocalOrigin(req.headers.origin) || !isTokenEqual(req.headers["x-workbench-token"], SESSION_TOKEN)) {
         res.writeHead(403, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "本地会话令牌不匹配，请刷新工作台页面" }));
+        res.end(JSON.stringify({ ok: false, error: "本地会话令牌或来源校验不匹配，请刷新工作台页面" }));
         return;
       }
 
       const chunks = [];
-      for await (const ch of req) chunks.push(ch);
+      let totalBytes = 0;
+      for await (const ch of req) {
+        totalBytes += ch.length;
+        if (totalBytes > MAX_API_BODY_BYTES) {
+          res.writeHead(413, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "请求体过大" }));
+          return;
+        }
+        chunks.push(ch);
+      }
       const rawBody = Buffer.concat(chunks).toString("utf8");
       try {
         const body = rawBody ? JSON.parse(rawBody) : {};
@@ -155,7 +182,9 @@ async function startServer() {
 
     const relPath = url.pathname === "/" ? "index.html" : url.pathname.replace(/^\/+/, "");
     const safePath = path.resolve(DIST_DIR, relPath);
-    if (!safePath.startsWith(DIST_DIR) || !fs.existsSync(safePath) || fs.statSync(safePath).isDirectory()) {
+    const relFromDist = path.relative(DIST_DIR, safePath);
+    const insideDist = !relFromDist.startsWith("..") && !path.isAbsolute(relFromDist);
+    if (!insideDist || !fs.existsSync(safePath) || fs.statSync(safePath).isDirectory()) {
       const indexFile = path.join(DIST_DIR, "index.html");
       if (fs.existsSync(indexFile)) {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
