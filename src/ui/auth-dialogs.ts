@@ -1,4 +1,4 @@
-import { SUPPORTED_GEMINI_MODELS } from "../ai/gemini-client";
+import { GeminiPoolClient, SUPPORTED_GEMINI_MODELS } from "../ai/gemini-client";
 import { hostBridge } from "../platform/bridge";
 import type { GeminiModelId, KeyRotationStrategy } from "../types/config";
 import { icons } from "./icons";
@@ -181,48 +181,152 @@ export function mountAuthDialogs(root: HTMLElement): {
 
         <div class="field-group">
           <div class="field-label-row">
-            <label class="field-label" for="txt-gemini-keys">API Key 列表（每行一个，支持 AIza... 与 AQ...）</label>
-            <span class="field-hint">当前已保存 ${store.geminiSummary.count} 个密钥</span>
+            <label class="field-label">已加密存储的密钥池 (${store.geminiSummary.count} 个)</label>
+            ${
+              store.geminiSummary.count > 0
+                ? `<button type="button" id="btn-clear-all-keys" class="seg-option">清空全部</button>`
+                : ""
+            }
           </div>
           ${
             store.geminiSummary.maskedKeys.length > 0
-              ? `<div class="field-hint">已加密存储：${esc(store.geminiSummary.maskedKeys.join(" , "))}</div>`
-              : ""
+              ? `<div style="display:flex;flex-direction:column;gap:0.35rem;max-block-size:150px;overflow-y:auto">
+                  ${store.geminiSummary.maskedKeys
+                    .map(
+                      (mk, idx) => `
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;padding:0.3rem 0.55rem;border:1px solid var(--border-subtle);border-radius:6px;background:var(--bg-subtle)">
+                          <span class="mono-cell">#${idx + 1} · ${esc(mk)}</span>
+                          <button type="button" class="seg-option" data-del-key-idx="${idx}">删除</button>
+                        </div>`,
+                    )
+                    .join("")}
+                </div>`
+              : `<div class="field-hint">尚未添加任何 API Key，请在下方输入框新增。</div>`
           }
-          <textarea id="txt-gemini-keys" class="text-area" placeholder="粘贴新的 API Key（一行一个）点击「保存密钥池」即可替换；留空保存可清空密钥"></textarea>
+        </div>
+
+        <div class="field-group">
+          <div class="field-label-row">
+            <label class="field-label" for="txt-gemini-keys">新增 API Key（支持一次粘贴多个，每行一个，自动去重追加）</label>
+          </div>
+          <textarea id="txt-gemini-keys" class="text-area" placeholder="粘贴要新增的 AIza... 或 AQ... 密钥（每行一个），点击「+ 追加密钥」加入密钥池"></textarea>
+          <div class="btn-row-compact">
+            <button type="button" id="btn-add-gemini-keys" class="btn btn-compact">+ 追加到密钥池</button>
+            <button type="button" id="btn-test-gemini" class="btn btn-compact">测试当前模型连通性</button>
+          </div>
         </div>
       </div>
       <div class="dialog-footer">
-        <button type="button" class="btn" data-close-gemini>取消</button>
-        <button type="button" id="btn-save-gemini" class="btn btn-primary" autofocus>保存设置</button>
+        <button type="button" class="btn" data-close-gemini>关闭</button>
+        <button type="button" id="btn-save-gemini" class="btn btn-primary" autofocus>保存模型与开关</button>
       </div>
     `;
+
+    const syncUiPrefs = () => {
+      store.geminiEnabled =
+        geminiDialog.querySelector<HTMLInputElement>("#chk-gemini-enable")?.checked ?? true;
+      store.geminiModel =
+        (geminiDialog.querySelector<HTMLSelectElement>("#sel-gemini-model")?.value as GeminiModelId) ??
+        "gemini-3.8-flash";
+      store.geminiRotation =
+        (geminiDialog.querySelector<HTMLSelectElement>("#sel-gemini-rot")?.value as KeyRotationStrategy) ??
+        "round_robin";
+    };
 
     geminiDialog.querySelectorAll("[data-close-gemini]").forEach((b) =>
       b.addEventListener("click", () => geminiDialog.close()),
     );
 
+    geminiDialog.querySelectorAll<HTMLButtonElement>("[data-del-key-idx]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        syncUiPrefs();
+        const idx = Number(btn.dataset.delKeyIdx);
+        try {
+          const existing = await hostBridge.getPlainGeminiKeys();
+          if (idx >= 0 && idx < existing.length) {
+            existing.splice(idx, 1);
+            store.geminiSummary = await hostBridge.saveGeminiKeys(existing.join("\n"));
+            notifyStateChanged();
+            renderGeminiContent(`已删除第 #${idx + 1} 个密钥，当前剩余 ${store.geminiSummary.count} 个。`);
+          }
+        } catch (err) {
+          renderGeminiContent(err instanceof Error ? err.message : String(err), true);
+        }
+      });
+    });
+
+    geminiDialog.querySelector("#btn-clear-all-keys")?.addEventListener("click", async () => {
+      syncUiPrefs();
+      try {
+        store.geminiSummary = await hostBridge.saveGeminiKeys("");
+        notifyStateChanged();
+        renderGeminiContent("已清空全部 API 密钥。");
+      } catch (err) {
+        renderGeminiContent(err instanceof Error ? err.message : String(err), true);
+      }
+    });
+
+    geminiDialog.querySelector("#btn-add-gemini-keys")?.addEventListener("click", async () => {
+      syncUiPrefs();
+      const rawNew = geminiDialog.querySelector<HTMLTextAreaElement>("#txt-gemini-keys")?.value.trim() ?? "";
+      if (!rawNew) return renderGeminiContent("请先在上方输入框粘贴要新增的 API Key。", true);
+      try {
+        const existing = await hostBridge.getPlainGeminiKeys();
+        const incoming = rawNew
+          .split(/[\r\n,;]+/)
+          .map((k) => k.trim())
+          .filter((k) => k.length >= 16);
+        if (incoming.length === 0) {
+          return renderGeminiContent("未识别到有效的 API Key（长度需不少于 16 位）。", true);
+        }
+        const merged = [...new Set([...existing, ...incoming])];
+        const addedCount = merged.length - existing.length;
+        store.geminiSummary = await hostBridge.saveGeminiKeys(merged.join("\n"));
+        notifyStateChanged();
+        renderGeminiContent(
+          addedCount > 0
+            ? `已成功新增 ${addedCount} 个密钥，当前密钥池共 ${store.geminiSummary.count} 个。`
+            : `输入的密钥均已在密钥池中（共 ${store.geminiSummary.count} 个）。`,
+        );
+      } catch (err) {
+        renderGeminiContent(err instanceof Error ? err.message : String(err), true);
+      }
+    });
+
+    geminiDialog.querySelector("#btn-test-gemini")?.addEventListener("click", async () => {
+      syncUiPrefs();
+      try {
+        const keys = await hostBridge.getPlainGeminiKeys();
+        if (keys.length === 0) return renderGeminiContent("密钥池为空，请先新增至少一个 API Key。", true);
+        renderGeminiContent(`正在测试模型 ${store.geminiModel} 连通性（共 ${keys.length} 个密钥）...`);
+        const client = new GeminiPoolClient({
+          apiKeys: keys,
+          model: store.geminiModel,
+          rotation: store.geminiRotation,
+        });
+        await client.generateStructuredJson<{ ok: boolean }>({
+          systemInstruction: "Return JSON {\"ok\": true}.",
+          userPrompt: "ping",
+          jsonSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+        });
+        renderGeminiContent(`连通成功！模型 ${store.geminiModel} 可正常用于词序号精准分句。`);
+      } catch (err) {
+        renderGeminiContent(`连通测试失败：${err instanceof Error ? err.message : String(err)}`, true);
+      }
+    });
+
     geminiDialog
       .querySelector("#btn-save-gemini")
       ?.addEventListener("click", async () => {
-        store.geminiEnabled =
-          geminiDialog.querySelector<HTMLInputElement>("#chk-gemini-enable")
-            ?.checked ?? true;
-        store.geminiModel =
-          (geminiDialog.querySelector<HTMLSelectElement>("#sel-gemini-model")
-            ?.value as GeminiModelId) ?? "gemini-3.8-flash";
-        store.geminiRotation =
-          (geminiDialog.querySelector<HTMLSelectElement>("#sel-gemini-rot")
-            ?.value as KeyRotationStrategy) ?? "round_robin";
-
-        const rawKeys =
-          geminiDialog
-            .querySelector<HTMLTextAreaElement>("#txt-gemini-keys")
-            ?.value.trim() ?? "";
-
+        syncUiPrefs();
+        const rawNew = geminiDialog.querySelector<HTMLTextAreaElement>("#txt-gemini-keys")?.value.trim() ?? "";
         try {
-          if (rawKeys.length > 0) {
-            store.geminiSummary = await hostBridge.saveGeminiKeys(rawKeys);
+          if (rawNew.length > 0) {
+            const existing = await hostBridge.getPlainGeminiKeys();
+            const incoming = rawNew.split(/[\r\n,;]+/).map((k) => k.trim()).filter((k) => k.length >= 16);
+            if (incoming.length > 0) {
+              store.geminiSummary = await hostBridge.saveGeminiKeys([...new Set([...existing, ...incoming])].join("\n"));
+            }
           }
           notifyStateChanged();
           geminiDialog.close();
