@@ -32,14 +32,29 @@ export {
 };
 
 const txt = (grid: RichSheetGrid, r: number, c: number) =>
-  grid[r]?.[c]?.text?.trim() ?? "";
+  c >= 0 ? (grid[r]?.[c]?.text?.trim() ?? "") : "";
 
 const urlOf = (grid: RichSheetGrid, r: number, c: number) => {
+  if (c < 0) return "";
   const cell = grid[r]?.[c];
   if (!cell) return "";
   if (cell.url?.startsWith("http")) return cell.url.trim();
   return cell.text?.trim().startsWith("http") ? cell.text.trim() : "";
 };
+
+const optColIdx = (letter: string | undefined, fallback: number): number => {
+  if (letter === undefined) return fallback;
+  const t = letter.trim();
+  if (!t || /^(无|空|none|-|—)$/i.test(t)) return -1;
+  return colLetterToIndex(t, fallback);
+};
+
+function extractTitleFromZhCite(cite: string): string {
+  const cleaned = (cite || "").replace(/^——/, "").replace(/^[《（(]+|[》）)]+$/g, "").trim();
+  if (!cleaned) return "";
+  const parts = cleaned.split(/[・·]/).map((s) => s.trim()).filter(Boolean);
+  return parts[parts.length - 1] || cleaned;
+}
 
 export function parseArticleCatalogSheet(
   grid: RichSheetGrid,
@@ -49,14 +64,14 @@ export function parseArticleCatalogSheet(
   if (grid.length < 2) return entries;
 
   const m = { ...DEFAULT_LANG_SHEET_COLS, ...cfg };
-  const colBracket = colLetterToIndex(m.catalogZhBracketCol, 1);
-  const colLine = colLetterToIndex(m.catalogZhLineCol, 2);
-  const colZh = colLetterToIndex(m.catalogZhTitleCol, 3);
-  const colEn = colLetterToIndex(m.catalogEnTitleCol, 4);
-  const colTarget = colLetterToIndex(m.catalogTargetTitleCol, 5);
-  let colLink = colLetterToIndex(m.catalogDocLinkCol, 6);
-  let colTargetCite = colLetterToIndex(m.catalogTargetCiteCol, 7);
-  let colTargetBracketCite = colLetterToIndex(m.catalogTargetBracketCiteCol || "I", 8);
+  const colBracket = optColIdx(m.catalogZhBracketCol, 1);
+  const colLine = optColIdx(m.catalogZhLineCol, 2);
+  const colZh = optColIdx(m.catalogZhTitleCol, 3);
+  const colEn = optColIdx(m.catalogEnTitleCol, 4);
+  const colTarget = optColIdx(m.catalogTargetTitleCol, 5);
+  let colLink = optColIdx(m.catalogDocLinkCol, 6);
+  let colTargetCite = optColIdx(m.catalogTargetCiteCol, 7);
+  let colTargetBracketCite = optColIdx(m.catalogTargetBracketCiteCol, 8);
 
   const headerIdx = Math.max(0, (m.catalogHeaderRow || 1) - 1);
   if (!cfg) {
@@ -70,12 +85,12 @@ export function parseArticleCatalogSheet(
   }
 
   for (let r = headerIdx + 1; r < grid.length; r += 1) {
-    const zhTitle = txt(grid, r, colZh);
+    const zhBracketCite = txt(grid, r, colBracket);
+    const zhSubtitleCite = txt(grid, r, colLine);
+    const zhTitle = txt(grid, r, colZh) || extractTitleFromZhCite(zhBracketCite || zhSubtitleCite);
     const enTitle = txt(grid, r, colEn);
     const targetTitle = txt(grid, r, colTarget);
     const docUrl = urlOf(grid, r, colLink);
-    const zhBracketCite = txt(grid, r, colBracket);
-    const zhSubtitleCite = txt(grid, r, colLine);
     const targetCite = txt(grid, r, colTargetCite);
     const targetBracketCite = txt(grid, r, colTargetBracketCite);
     if (!zhTitle && !enTitle && !targetTitle) continue;

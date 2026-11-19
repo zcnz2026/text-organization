@@ -183,6 +183,11 @@ const intVal = (s: string, fb: number) => {
   return Number.isFinite(n) && n > 0 ? n : fb;
 };
 const colVal = (s: string, fb: string) => (/^[A-Za-z]{1,2}$|^AUTO$/i.test(s) ? s.toUpperCase() : fb);
+const optColVal = (s: string, fb: string) => {
+  const t = (s || "").trim();
+  if (!t || /^(无|空|none|-|—)$/i.test(t)) return "";
+  return /^[A-Za-z]{1,2}$/i.test(t) ? t.toUpperCase() : fb;
+};
 
 function findSheet(map: Map<string, RichSheetGrid>, exact: string, prefixes: string[]): RichSheetGrid | undefined {
   if (map.has(exact)) return map.get(exact);
@@ -275,14 +280,14 @@ function applyColumnRow(
   const patch: Partial<PerLanguageSheetColumnConfig> = {};
   if (t.includes("六本书") || t.includes("书籍目录")) {
     patch.catalogHeaderRow = intVal(vals[0], defaultLangCols.catalogHeaderRow);
-    patch.catalogZhBracketCol = colVal(vals[1], defaultLangCols.catalogZhBracketCol);
-    patch.catalogZhLineCol = colVal(vals[2], defaultLangCols.catalogZhLineCol);
-    patch.catalogZhTitleCol = colVal(vals[3], defaultLangCols.catalogZhTitleCol);
-    patch.catalogEnTitleCol = colVal(vals[4], defaultLangCols.catalogEnTitleCol);
-    patch.catalogTargetTitleCol = colVal(vals[5], defaultLangCols.catalogTargetTitleCol);
-    patch.catalogDocLinkCol = colVal(vals[6], defaultLangCols.catalogDocLinkCol);
-    patch.catalogTargetCiteCol = colVal(vals[7], defaultLangCols.catalogTargetCiteCol);
-    patch.catalogTargetBracketCiteCol = colVal(vals[8], defaultLangCols.catalogTargetBracketCiteCol);
+    patch.catalogZhBracketCol = optColVal(vals[1], defaultLangCols.catalogZhBracketCol);
+    patch.catalogZhLineCol = optColVal(vals[2], defaultLangCols.catalogZhLineCol);
+    patch.catalogZhTitleCol = optColVal(vals[3], defaultLangCols.catalogZhTitleCol);
+    patch.catalogEnTitleCol = optColVal(vals[4], defaultLangCols.catalogEnTitleCol);
+    patch.catalogTargetTitleCol = optColVal(vals[5], defaultLangCols.catalogTargetTitleCol);
+    patch.catalogDocLinkCol = optColVal(vals[6], defaultLangCols.catalogDocLinkCol);
+    patch.catalogTargetCiteCol = optColVal(vals[7], defaultLangCols.catalogTargetCiteCol);
+    patch.catalogTargetBracketCiteCol = optColVal(vals[8], defaultLangCols.catalogTargetBracketCiteCol);
   } else if (t.includes("单篇") || t.includes("神话文档")) {
     patch.manuscriptZhColIndex = intVal(vals[1], defaultLangCols.manuscriptZhColIndex);
     patch.manuscriptEnColIndex = intVal(vals[2], defaultLangCols.manuscriptEnColIndex);
