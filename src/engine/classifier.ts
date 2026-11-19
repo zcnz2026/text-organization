@@ -23,6 +23,15 @@ function isBibleCategory(filt: string): boolean {
   return /^(新约|旧约|圣经)$/u.test(filt.trim());
 }
 
+function isBibleCitationRow(row: ScriptRow): boolean {
+  if (isSubtitleRow(row)) return true;
+  const zh = row.chinese.trim();
+  const en = row.english.trim();
+  const zhCite = /^[（(][^）)]+\d+[:：]\d+[^）)]*[）)][，,。.]?$/u.test(zh);
+  const enCite = /^\([A-Za-z0-9\s.]+\d+[:.]\d+[^)]*\)[.,]?$/i.test(en);
+  return zhCite || enCite;
+}
+
 function isIdiomCategory(filt: string): boolean {
   const f = filt.trim();
   return f.includes("撒但毒素") || f.includes("俗语");
@@ -109,7 +118,7 @@ export function classifyScriptTasks(rows: ScriptRow[]): ExtractionTask[] {
       const verseIndices: number[] = [];
       let citationRowIndex: number | undefined;
       while (i < rows.length && isBibleCategory(rows[i].filterCategory.trim())) {
-        if (isSubtitleRow(rows[i])) {
+        if (isBibleCitationRow(rows[i])) {
           citationRowIndex = rows[i].rowIndex;
           i += 1;
           break;

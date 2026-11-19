@@ -160,24 +160,106 @@ function sliceBySentenceRatio(text: string, startRatio: number, endRatio: number
   return picked.length > 0 ? picked.join(" ") : text;
 }
 
+function splitBibleTargetAndRef(raw: string): { body: string; ref: string } {
+  const trimmed = (raw || "").trim();
+  const m = /\(([^()]+?\d+[:.,–\-]\d+[^()]*)\)[.,。]?$/u.exec(trimmed);
+  if (!m) return { body: trimmed, ref: "" };
+  return { body: trimmed.slice(0, m.index).trim(), ref: m[1].trim() };
+}
+
+function mergeBibleRangeRef(firstRef: string, lastRef: string): string {
+  if (!firstRef || !lastRef || firstRef === lastRef) return firstRef || lastRef;
+  const endVerse = /(\d+)\s*$/.exec(lastRef)?.[1];
+  if (endVerse && !firstRef.endsWith(`–${endVerse}`) && !firstRef.endsWith(`-${endVerse}`)) {
+    return `${firstRef}–${endVerse}`;
+  }
+  return firstRef;
+}
+
 export function findBibleVerse(
   entries: BibleEntry[],
   refHint: string,
   verseRows: ScriptRow[],
 ): { text: string; targetCitationRef: string; truncatedStart: boolean } | null {
+  if (entries.length === 0 || verseRows.length === 0) return null;
+
   const keyRef = normBibleRef(refHint);
   const firstEn = normMatchKey(verseRows[0]?.english ?? "").slice(0, 24);
-  let found = keyRef ? entries.find((e) => normBibleRef(e.chapterRef) === keyRef) : undefined;
-  if (!found && firstEn.length >= 8) found = entries.find((e) => normMatchKey(e.english).includes(firstEn));
-  if (!found) return null;
+  const firstZh = normMatchKey(verseRows[0]?.chinese ?? "").slice(0, 14);
+  const lastEn = normMatchKey(verseRows[verseRows.length - 1]?.english ?? "").slice(-24);
+  const lastZh = normMatchKey(verseRows[verseRows.length - 1]?.chinese ?? "").slice(-14);
 
-  const raw = found.targetText.trim();
-  const trailingRefMatch = /\(([^()]+?\d+[:.,–\-]\d+[^()]*)\)[.,。]?$/u.exec(raw);
-  const targetCitationRef = trailingRefMatch
-    ? `(${trailingRefMatch[1].trim()})`
-    : `(${found.chapterRef || refHint.replace(/^[（(]|[)）.]$/g, "")})`;
-  const bodyOnly = trailingRefMatch ? raw.slice(0, trailingRefMatch.index).trim() : raw;
-  const trunc = verseRows[0]?.remark.includes("涉及截取") || verseRows[0]?.english.includes("…");
+  let startIdx = -1;
+  if (keyRef) startIdx = entries.findIndex((e) => normBibleRef(e.chapterRef) === keyRef);
+
+  // Range lookup (e.g. "romans 7:15-16" -> match consecutive "romans 7:15" + "romans 7:16")
+  if (startIdx < 0 && keyRef) {
+    const rangeMatch = /^(.+?\d+):(\d+)-(\d+)$/.exec(keyRef);
+    if (rangeMatch) {
+      const [, bookChap, startV, endV] = rangeMatch;
+      const sV = Number.parseInt(startV, 10);
+      const eV = Number.parseInt(endV, 10);
+      const idx = entries.findIndex((e) => normBibleRef(e.chapterRef) === `${bookChap}:${sV}`);
+      if (idx >= 0 && eV > sV && eV - sV <= 6) {
+        const collected: BibleEntry[] = [];
+        for (let v = sV; v <= eV; v += 1) {
+          const hit = entries.find((e) => normBibleRef(e.chapterRef) === `${bookChap}:${v}`);
+          if (hit) collected.push(hit);
+        }
+        if (collected.length >= 2) {
+          const parts = collected.map((c) => splitBibleTargetAndRef(c.targetText));
+          const mergedBody = parts.map((p) => stripOuterDoubleQuotes(p.body)).join(" ");
+          const mergedRef = mergeBibleRangeRef(parts[0].ref, parts[parts.length - 1].ref) || refHint.replace(/^[（(]|[)）.]$/g, "");
+          const trunc = verseRows[0]?.remark.includes("涉及截取") || verseRows[0]?.english.includes("…") || verseRows[0]?.english.includes("...");
+          return { text: mergedBody, targetCitationRef: `(${mergedRef})`, truncatedStart: Boolean(trunc) };
+        }
+      }
+    }
+  }
+
+  // Fallback: match by English or Chinese text of first verse row
+  if (startIdx < 0) {
+    startIdx = entries.findIndex(
+      (e) =>
+        (firstEn.length >= 8 && normMatchKey(e.english).includes(firstEn)) ||
+        (firstZh.length >= 5 && normMatchKey(e.chinese).includes(firstZh)),
+    );
+  }
+  if (startIdx < 0) return null;
+
+  // If the script spans multiple consecutive verses stored as separate rows in the library (e.g. Rom 7:15 + 7:16), auto-extend
+  let endIdx = startIdx;
+  const startEntry = entries[startIdx];
+  const hasLastInStart =
+    (lastEn.length >= 8 && normMatchKey(startEntry.english).includes(lastEn)) ||
+    (lastZh.length >= 5 && normMatchKey(startEntry.chinese).includes(lastZh));
+  if (!hasLastInStart && verseRows.length > 1) {
+    for (let j = startIdx + 1; j < Math.min(entries.length, startIdx + 5); j += 1) {
+      const e = entries[j];
+      if (
+        (lastEn.length >= 8 && normMatchKey(e.english).includes(lastEn)) ||
+        (lastZh.length >= 5 && normMatchKey(e.chinese).includes(lastZh))
+      ) {
+        endIdx = j;
+        break;
+      }
+    }
+  }
+
+  const slice = entries.slice(startIdx, endIdx + 1);
+  const parts = slice.map((c) => splitBibleTargetAndRef(c.targetText));
+  const bodyOnly = slice.length > 1 ? parts.map((p) => stripOuterDoubleQuotes(p.body)).join(" ") : parts[0].body;
+  const mergedRef =
+    slice.length > 1
+      ? mergeBibleRangeRef(parts[0].ref, parts[parts.length - 1].ref)
+      : parts[0].ref;
+  const targetCitationRef = mergedRef
+    ? `(${mergedRef})`
+    : `(${startEntry.chapterRef || refHint.replace(/^[（(]|[)）.]$/g, "")})`;
+  const trunc =
+    verseRows[0]?.remark.includes("涉及截取") ||
+    verseRows[0]?.english.includes("…") ||
+    verseRows[0]?.english.includes("...");
   return { text: bodyOnly, targetCitationRef, truncatedStart: Boolean(trunc) };
 }
 

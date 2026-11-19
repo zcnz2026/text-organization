@@ -28,6 +28,7 @@ import {
 import {
   aggregateHymnSublinesForBlock,
   findArticleInCatalog,
+  findBibleVerse,
   locateParagraphInManuscript,
   normMatchKey,
   resolveCitationText,
@@ -866,5 +867,48 @@ describe("Custom SourceScriptColumnConfig remapped columns", () => {
     expect(agg![7]).toBe("Насолоджуючись багатством Божих слів, я справді багато здобув.");
     expect(agg![9]).toBe("Усі Божі слова є істиною.");
     expect(agg![10]).toBe("Усі Божі слова є істиною.");
+  });
+
+  it("matches single-row Luke 17:24-25 and merges multi-row Romans 7:15 + 7:16 Bible verses with leading ellipsis", () => {
+    const ukBible = [
+      {
+        chapterRef: "Luke\n17:24–25",
+        chinese: "“因为人子在他降临的日子，好像闪电从天这边一闪直照到天那边。只是他必须先受许多苦，又被这世代弃绝。”（路17:24-25）",
+        english: '"For as the lightning, that lightens out of the one part under heaven, shines to the other part under heaven; so shall also the Son of man be in His day. But first must He suffer many things, and be rejected of this generation" (Luke 17:24–25).',
+        targetText: "«Бо як блискавка, блиснувши, світить із одного краю під небом до другого краю під небом, так буде Свого дня й Син Людський. А перше належить багато страждати Йому, і відцурається рід цей від Нього...» (Луки 17:24–25).",
+      },
+      {
+        chapterRef: "Romans\n7:15",
+        chinese: "我所愿意的，我并不做；我所恨恶的，我倒去做。",
+        english: "For what I would, that do I not; but what I hate, that do I.",
+        targetText: "«Я бо чиню не те, що хочу, але що ненавиджу, те я роблю» (До Римлян 7:15).",
+      },
+      {
+        chapterRef: "Romans\n7:16",
+        chinese: "若我所做的，是我所不愿意的，我就应承律法是善的。",
+        english: "If then I do that which I would not, I consent to the law that it is good.",
+        targetText: "«А коли роблю те, чого я не хочу, то згоджуюсь із Законом, що він добрий» (До Римлян 7:16).",
+      },
+    ];
+
+    const lukeHit = findBibleVerse(ukBible, "(Luke 17:24–25).", [
+      makeScriptRow({ rowIndex: 0, chinese: "“因为人子在他降临的日子，", english: '"For as the lightning,' }),
+      makeScriptRow({ rowIndex: 1, chinese: "好像闪电从天这边一闪直照到天那边。", english: "that lightens out of the one part under heaven, shines to the other part under heaven; so shall also the Son of man be in His day." }),
+      makeScriptRow({ rowIndex: 2, chinese: "只是他必须先受许多苦，又被这世代弃绝”", english: 'But first must He suffer many things, and be rejected of this generation"' }),
+    ]);
+    expect(lukeHit).not.toBeNull();
+    expect(lukeHit!.targetCitationRef).toBe("(Луки 17:24–25)");
+    expect(lukeHit!.text).toContain("Бо як блискавка");
+
+    const romHit = findBibleVerse(ukBible, "新约", [
+      makeScriptRow({ rowIndex: 0, chinese: "“我所愿意的，我并不做，", english: '"... what I would, that do I not;' }),
+      makeScriptRow({ rowIndex: 1, chinese: "我所恨恶的，我倒去做，", english: "but what I hate, that do I." }),
+      makeScriptRow({ rowIndex: 2, chinese: "若我所做的，是我所不愿意的，我就应承律法是善的。”", english: 'If then I do that which I would not, I consent to the law that it is good."' }),
+    ]);
+    expect(romHit).not.toBeNull();
+    expect(romHit!.truncatedStart).toBe(true);
+    expect(romHit!.targetCitationRef).toBe("(До Римлян 7:15–16)");
+    expect(romHit!.text).toContain("Я бо чиню не те");
+    expect(romHit!.text).toContain("А коли роблю те");
   });
 });
