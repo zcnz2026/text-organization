@@ -123,6 +123,15 @@ export function locateParagraphInManuscript(
     const pZh = normMatchKey(paragraphs[i].chinese);
     const pEn = normMatchKey(paragraphs[i].english);
     if ((firstZhProbe.length >= 4 && pZh.includes(firstZhProbe)) || (firstEnProbe.length >= 8 && pEn.includes(firstEnProbe))) {
+      // Avoid matching a short title row when we are looking for a multi-row body excerpt
+      if (sourceRows.length >= 3 && paragraphs[i].target.trim().split(/\s+/).length < sourceRows.length && i + 1 < paragraphs.length) {
+        const hasLaterBody = paragraphs.slice(i + 1).some((p) => {
+          const lz = normMatchKey(p.chinese);
+          const le = normMatchKey(p.english);
+          return (firstZhProbe.length >= 4 && lz.includes(firstZhProbe)) || (firstEnProbe.length >= 8 && le.includes(firstEnProbe));
+        });
+        if (hasLaterBody) continue;
+      }
       startIdx = i;
       break;
     }
@@ -141,24 +150,31 @@ export function locateParagraphInManuscript(
 
   const combinedTarget = paragraphs.slice(startIdx, endIdx + 1).map((p) => p.target.trim()).filter(Boolean).join(" ");
   const combinedEn = paragraphs.slice(startIdx, endIdx + 1).map((p) => p.english.trim()).filter(Boolean).join(" ");
-  const fullParaZh = normMatchKey(paragraphs[startIdx].chinese);
+  const fullSpanZh = normMatchKey(paragraphs.slice(startIdx, endIdx + 1).map((p) => p.chinese).join(""));
   const allRowsZh = normMatchKey(sourceRows.map((r) => r.chinese).join(""));
 
-  if (endIdx === startIdx && fullParaZh.length > allRowsZh.length + 10) {
-    const startPos = firstZhProbe ? fullParaZh.indexOf(firstZhProbe) : 0;
-    const startRatio = Math.max(0, (startPos >= 0 ? startPos : 0) / Math.max(1, fullParaZh.length));
-    const endPos = lastZhProbe ? fullParaZh.lastIndexOf(lastZhProbe) : -1;
-    const endRatio = endPos >= 0 ? Math.min(1, (endPos + lastZhProbe.length) / Math.max(1, fullParaZh.length)) : Math.min(1, startRatio + allRowsZh.length / Math.max(1, fullParaZh.length));
+  if (fullSpanZh.length > allRowsZh.length + 10) {
+    const startPos = firstZhProbe ? fullSpanZh.indexOf(firstZhProbe) : 0;
+    const startRatio = Math.max(0, (startPos >= 0 ? startPos : 0) / Math.max(1, fullSpanZh.length));
+    const endPos = lastZhProbe ? fullSpanZh.lastIndexOf(lastZhProbe) : -1;
+    const endRatio =
+      endPos >= 0
+        ? Math.min(1, (endPos + lastZhProbe.length) / Math.max(1, fullSpanZh.length))
+        : Math.min(1, startRatio + allRowsZh.length / Math.max(1, fullSpanZh.length));
     if (startRatio > 0.04 || endRatio < 0.94) {
+      const margin = combinedTarget.length > 2400 ? 0.08 : 0.16;
       const contextWindowTarget =
         combinedTarget.length > 900
-          ? sliceByClauseRatio(combinedTarget, Math.max(0, startRatio - 0.18), Math.min(1, endRatio + 0.18))
+          ? sliceByClauseRatio(combinedTarget, Math.max(0, startRatio - margin), Math.min(1, endRatio + margin))
           : combinedTarget;
       return {
         matchedText: sliceByClauseRatio(combinedTarget, startRatio, endRatio),
         fullParagraphTarget: combinedTarget,
         contextWindowTarget,
-        fullParagraphEn: combinedEn.length > 900 ? sliceByClauseRatio(combinedEn, Math.max(0, startRatio - 0.18), Math.min(1, endRatio + 0.18)) : combinedEn,
+        fullParagraphEn:
+          combinedEn.length > 900
+            ? sliceByClauseRatio(combinedEn, Math.max(0, startRatio - margin), Math.min(1, endRatio + margin))
+            : combinedEn,
         isPartial: true,
         truncatedStart: Boolean(truncMatch),
       };
