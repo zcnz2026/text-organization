@@ -64,6 +64,21 @@ export class CloudCatalogLoader {
     return grid;
   }
 
+  private async loadBibleGridSafe(rawUrl: string): Promise<RichSheetGrid> {
+    if (!rawUrl) return [];
+    const parsed = parseGoogleResourceUrl(rawUrl, "sheet");
+    if (!parsed || parsed.kind !== "sheet") return [];
+    if (parsed.gid !== null) return this.loadGridCached(rawUrl);
+
+    const meta = await this.sheets.getSpreadsheetMeta(parsed.id);
+    const tab = meta.sheets.find((s) => {
+      const t = s.title.toLowerCase();
+      if (/天主教|catholic|目录|catalog|格式/.test(t)) return false;
+      return /圣经|bible/.test(t);
+    });
+    return this.loadGridCached(rawUrl, tab ? tab.sheetId : null);
+  }
+
   private async loadHymnGridWithEpisodeKeyword(
     rawUrl: string,
     episodeKeyword?: string,
@@ -206,7 +221,7 @@ export class CloudCatalogLoader {
         ? this.loadGridCached(links.articleCatalogUrl)
         : Promise.resolve([]),
       links.bibleSheetUrl
-        ? this.loadGridCached(links.bibleSheetUrl)
+        ? this.loadBibleGridSafe(links.bibleSheetUrl)
         : Promise.resolve([]),
       links.idiomSheetUrl
         ? this.loadGridCached(links.idiomSheetUrl)
