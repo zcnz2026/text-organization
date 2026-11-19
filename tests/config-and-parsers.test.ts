@@ -830,11 +830,17 @@ describe("Custom SourceScriptColumnConfig remapped columns", () => {
       ["", "生命天天有长进。", "and my life progresses every day.", "і моє життя щодня прогресує."],
       ["", "神话道尽人类败坏实情，", "God's words lay bare the facts of man's corruption,", "Божі слова оголюють факти людської розбещеності,"],
       ["", "使人都心服口服，", "leaving everyone utterly convinced.", "залишаючи всіх цілковито переконаними."],
+      ["", "经历神话审判受尽试炼，", "Through the judgment of God's words and suffering many trials,", "Через суд Божих слів і переживання багатьох випробувань"],
+      ["", "败坏性情得洁净，败坏性情得洁净。", "my corrupt disposition is cleansed, my corrupt disposition is cleansed.", "мій розбещений характер очищується, мій розбещений характер очищується."],
+      ["", "享受神的话语丰丰富富，我得着的实在多，", "Enjoying the richness of God's words, I have truly gained much.", "Насолоджуючись багатством Божих слів, я справді багато здобув."],
+      ["", "看见神的性情公义圣洁，我敬畏神仰慕神。", "Seeing the righteousness and holiness of God's disposition, I fear God and adore Him.", "Бачачи праведність і святість Божого характеру, я боюся Бога й обожнюю Його."],
+      ["", "神的话语都是真理。", "All God's words are the truth.", "Усі Божі слова є істиною."],
+      ["", "神的话语都是真理。", "All God's words are the truth.", "Усі Божі слова є істиною."],
     ]);
 
     const hymns = parseHymnSheet(ukHymnGrid);
     expect(hymns).toHaveLength(1);
-    expect(hymns[0].lines).toHaveLength(10);
+    expect(hymns[0].lines).toHaveLength(16);
 
     const scriptRows = [
       makeScriptRow({ rowIndex: 0, chinese: "“神来在人间与人同生活，发表了许多真理，", english: "\"God has come to earth to live with man, expressing many truths." }),
@@ -842,6 +848,12 @@ describe("Custom SourceScriptColumnConfig remapped columns", () => {
       makeScriptRow({ rowIndex: 2, chinese: "每天吃喝神话活在神前，有圣灵开启光照，", english: "Each day, I eat and drink God's words and live before God; the Holy Spirit enlightens and illuminates me." }),
       makeScriptRow({ rowIndex: 3, chinese: "我明白真理越来越透亮，生命天天有长进。", english: "I understand the truth ever more clearly, and my life progresses every day." }),
       makeScriptRow({ rowIndex: 4, chinese: "神话道尽人类败坏实情，使人都心服口服，", english: "God's words lay bare the facts of man's corruption, leaving everyone utterly convinced." }),
+      makeScriptRow({ rowIndex: 5, chinese: "经历神话审判受尽试炼，", english: "Through the judgment of God's words and suffering many trials," }),
+      makeScriptRow({ rowIndex: 6, chinese: "败坏性情得洁净，败坏性情得洁净。", english: "my corrupt disposition is cleansed." }),
+      makeScriptRow({ rowIndex: 7, chinese: "享受神的话语丰丰富富，我得着的实在多，", english: "Enjoying the richness of God's words, I have truly gained much." }),
+      makeScriptRow({ rowIndex: 8, chinese: "看见神的性情公义圣洁，我敬畏神仰慕神。", english: "Seeing the righteousness and holiness of God's disposition, I fear God and adore Him." }),
+      makeScriptRow({ rowIndex: 9, chinese: "神的话语是真理。", english: "God's words are the truth." }),
+      makeScriptRow({ rowIndex: 10, chinese: "神的话语是真理。”", english: "God's words are the truth.\"" }),
     ];
 
     const agg = aggregateHymnSublinesForBlock(hymns[0].lines, scriptRows);
@@ -851,5 +863,8 @@ describe("Custom SourceScriptColumnConfig remapped columns", () => {
     expect(agg![2]).toBe("Щодня я їм і п'ю Божі слова та живу перед Богом; Святий Дух просвіщає й осяює мене.");
     expect(agg![3]).toBe("Я розумію істину дедалі ясніше, і моє життя щодня прогресує.");
     expect(agg![4]).toBe("Божі слова оголюють факти людської розбещеності, залишаючи всіх цілковито переконаними.");
+    expect(agg![7]).toBe("Насолоджуючись багатством Божих слів, я справді багато здобув.");
+    expect(agg![9]).toBe("Усі Божі слова є істиною.");
+    expect(agg![10]).toBe("Усі Божі слова є істиною.");
   });
 });

@@ -197,6 +197,25 @@ export function findHymnMatch(hymns: HymnEntry[], hint: string): HymnEntry | nul
   return hymns.find((h) => normMatchKey(h.zhTitle) === targetKey || normMatchKey(h.enTitle) === targetKey) ?? null;
 }
 
+function subseqCoverage(shorter: string, longer: string): number {
+  if (!shorter || !longer) return 0;
+  let i = 0;
+  for (let j = 0; j < longer.length && i < shorter.length; j += 1) {
+    if (shorter[i] === longer[j]) i += 1;
+  }
+  return i / longer.length;
+}
+
+function lyricKeyScore(a: string, b: string): number {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  if (a === b + b || b === a + a) return 0.96;
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  if (shorter.length < 4) return 0;
+  if (longer.includes(shorter)) return shorter.length / longer.length;
+  return subseqCoverage(shorter, longer);
+}
+
 export function aggregateHymnSublinesForBlock(
   hymnLines: ArticleParagraph[],
   blockRows: ScriptRow[],
@@ -208,43 +227,44 @@ export function aggregateHymnSublinesForBlock(
   for (const br of blockRows) {
     const kZh = normMatchKey(br.chinese);
     const kEn = normMatchKey(br.english);
-    let matchedTarget: string | null = null;
 
-    const tryMatchAt = (startIdx: number): { text: string; nextIdx: number } | null => {
-      let accZh = "";
-      let accEn = "";
-      const targets: string[] = [];
-      for (let span = 1; span <= 5 && startIdx + span - 1 < hymnLines.length; span += 1) {
-        const hl = hymnLines[startIdx + span - 1];
-        accZh += normMatchKey(hl.chinese);
-        accEn += normMatchKey(hl.english);
-        targets.push(stripOuterDoubleQuotes(hl.target).trim());
-        const zhHit = Boolean(kZh && accZh && (accZh === kZh || (span === 1 && kZh === accZh + accZh)));
-        const enHit = Boolean(kEn && accEn && (accEn === kEn || (span === 1 && kEn === accEn + accEn)));
-        if (zhHit || enHit) return { text: targets.filter(Boolean).join(" "), nextIdx: startIdx + span };
+    const findBestFrom = (fromIdx: number, toIdx: number): { text: string; nextIdx: number; score: number } | null => {
+      let best: { text: string; nextIdx: number; score: number } | null = null;
+      for (let startIdx = fromIdx; startIdx < toIdx; startIdx += 1) {
+        let accZh = "";
+        let accEn = "";
+        const targets: string[] = [];
+        for (let span = 1; span <= 5 && startIdx + span - 1 < hymnLines.length; span += 1) {
+          const hl = hymnLines[startIdx + span - 1];
+          accZh += normMatchKey(hl.chinese);
+          accEn += normMatchKey(hl.english);
+          targets.push(stripOuterDoubleQuotes(hl.target).trim());
+          const score = Math.max(lyricKeyScore(accZh, kZh), lyricKeyScore(accEn, kEn));
+          if (score >= 0.78 && (!best || score > best.score)) {
+            best = { text: targets.filter(Boolean).join(" "), nextIdx: startIdx + span, score };
+            if (score >= 0.99) return best;
+          }
+          if (kZh && accZh.length > kZh.length * 1.45 && kEn && accEn.length > kEn.length * 1.45) break;
+        }
+        if (best && best.score >= 0.85) return best;
       }
-      return null;
+      return best;
     };
 
-    for (let s = cursor; s < hymnLines.length; s += 1) {
-      const m = tryMatchAt(s);
-      if (m) {
-        matchedTarget = m.text;
-        cursor = m.nextIdx;
-        break;
-      }
+    const forwardHit = findBestFrom(cursor, hymnLines.length);
+    if (forwardHit) {
+      out.push(forwardHit.text);
+      cursor = forwardHit.nextIdx;
+      continue;
     }
-    if (matchedTarget === null) {
-      for (let s = 0; s < cursor; s += 1) {
-        const m = tryMatchAt(s);
-        if (m) {
-          matchedTarget = m.text;
-          break;
-        }
-      }
+
+    const fallbackHit = findBestFrom(0, cursor);
+    if (fallbackHit) {
+      out.push(fallbackHit.text);
+      continue;
     }
-    if (matchedTarget === null) return null;
-    out.push(matchedTarget);
+
+    return null;
   }
   return out;
 }
