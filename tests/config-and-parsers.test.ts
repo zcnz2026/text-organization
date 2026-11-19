@@ -40,6 +40,7 @@ import {
 } from "../src/engine/text-matcher";
 import { parseDocxDocumentXml } from "../src/google/docx-drive-client";
 import { parseGoogleResourceUrl } from "../src/google/url-parser";
+import { isNewerVersion } from "../src/platform/updater";
 import type { ScriptRow } from "../src/types/domain";
 import { DEFAULT_LANG_SHEET_COLS } from "../src/types/schema-config";
 
@@ -994,5 +995,13 @@ describe("Custom SourceScriptColumnConfig remapped columns", () => {
     expect(batchRes.get("blk_1")?.usedAi).toBe(true);
     expect(batchRes.get("blk_1")?.lines).toEqual(["Розбещеному характеру людей притаманна спільна проблема"]);
     expect(batchRes.get("blk_2")?.lines[1]).toContain(rule.ellipsis);
+  });
+
+  it("compares semver versions accurately for auto-update checks", () => {
+    expect(isNewerVersion("v0.2.6", "0.2.5")).toBe(true);
+    expect(isNewerVersion("0.3.0", "0.2.5")).toBe(true);
+    expect(isNewerVersion("1.0.0", "0.9.9")).toBe(true);
+    expect(isNewerVersion("0.2.5", "0.2.5")).toBe(false);
+    expect(isNewerVersion("0.2.4", "0.2.5")).toBe(false);
   });
 });

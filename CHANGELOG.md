@@ -2,6 +2,13 @@
 
 All notable changes to **剧本对应语系工作台 (Script Language Matcher)** will be documented in this file.
 
+## [0.2.5] - 2026-11-19
+
+### Added & Fixed
+- **修复首屏顶栏下方大块空白跳动 Bug (`src/ui/styles/layout.css`)**：将 `.app-shell` 改为纵向弹性布局，避免空的 `#slot-mobile-jump` 占满 `1fr` 导致首屏面板被顶到下方。
+- **新增自动检查更新提醒 (`src/platform/updater.ts`, `src/ui/update-dialog.ts`, `src/ui/header-bar.ts`)**：启动后自动静默检测 `zcnz2026/text-organization` GitHub Releases/Tags 最新版本，发现新版本自动弹窗提示更新并提供一键下载入口；顶部栏版本按钮支持随时手动检查更新。
+- **AI 与左侧栏精简**：模型收敛为 `Gemini 3.5 Flash Lite`（默认）与 `Gemini 3.1 Flash Lite`，放宽长段 prompt 窗口与输出上限；密钥池支持逐条删除、追加新增与一键测试连通性；左侧配置栏精简为单行表单 + 弹窗语种多选。
+
 ## [0.2.4] - 2026-11-19
 
 ### Added & Improved

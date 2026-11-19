@@ -1,9 +1,11 @@
 import { hostBridge } from "../platform/bridge";
+import { checkForUpdates, isVersionDismissed } from "../platform/updater";
 import { mountAuthDialogs } from "./auth-dialogs";
 import { mountCatalogConfigDialog } from "./catalog-config-dialog";
 import { renderHeaderBar } from "./header-bar";
 import { renderPreviewStage } from "./preview-table";
 import { mountRulesDialog } from "./rules-dialog";
+import { openUpdateDialog } from "./update-dialog";
 import {
   downloadConfigTemplateXlsx,
   exportCurrentRunsXlsx,
@@ -117,4 +119,21 @@ export async function mountWorkbenchApp(appRoot: HTMLElement): Promise<void> {
   } catch {
     // Static mode remains usable for local CSV and demo inspection
   }
+
+  // Silent background check for newer GitHub releases
+  setTimeout(() => {
+    void checkForUpdates()
+      .then((res) => {
+        if (res.hasUpdate) {
+          store.availableUpdate = res;
+          notifyStateChanged();
+          if (!isVersionDismissed(res.latestVersion)) {
+            openUpdateDialog(res);
+          }
+        }
+      })
+      .catch(() => {
+        // Offline or private repo: stay quiet on startup
+      });
+  }, 1500);
 }

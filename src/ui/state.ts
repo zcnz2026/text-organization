@@ -1,4 +1,5 @@
 import { BUILTIN_PUNCTUATION_RULES } from "../catalog/lang-presets";
+import type { UpdateCheckResult } from "../platform/updater";
 import type {
   GeminiModelId,
   KeyRotationStrategy,
@@ -85,6 +86,7 @@ export interface AppState {
   progressPercent: number;
   progressText: string;
   notice: { type: "info" | "error"; message: string } | null;
+  availableUpdate: UpdateCheckResult | null;
 }
 
 interface PersistedSchemaBundle {
@@ -241,6 +243,7 @@ export const store: AppState = {
   progressPercent: 0,
   progressText: "",
   notice: null,
+  availableUpdate: null,
 };
 
 export function getLangCols(lang: string): PerLanguageSheetColumnConfig {

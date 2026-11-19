@@ -1,5 +1,7 @@
+import { APP_VERSION } from "../platform/version";
 import { icons } from "./icons";
 import { notifyStateChanged, store } from "./state";
+import { openUpdateDialog } from "./update-dialog";
 
 export function renderHeaderBar(
   container: HTMLElement,
@@ -29,13 +31,12 @@ export function renderHeaderBar(
       <div class="brand-group">
         <img src="/app-icon.svg" alt="" class="brand-logo" width="24" height="24" />
         <h1 class="brand-title">剧本对应语系工作台</h1>
-        <a
-          href="https://github.com/zcnz2026/text-organization"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="version-link"
-          title="打开 GitHub 仓库与版本发布记录"
-        >v0.2.3 · 版本库</a>
+        <button
+          type="button"
+          id="btn-check-update"
+          class="seg-option"
+          title="点击检查 GitHub 最新版本"
+        >${store.availableUpdate?.hasUpdate ? `发现新版本 v${esc(store.availableUpdate.latestVersion)}` : `v${esc(APP_VERSION)} · 检查更新`}</button>
       </div>
       <div class="topbar-actions">
         <button type="button" id="btn-open-oauth" class="btn ${oauthConnected ? "btn-connected" : ""}">
@@ -63,6 +64,9 @@ export function renderHeaderBar(
     </header>
   `;
 
+  container
+    .querySelector("#btn-check-update")
+    ?.addEventListener("click", () => openUpdateDialog(store.availableUpdate));
   container
     .querySelector("#btn-open-oauth")
     ?.addEventListener("click", actions.openOAuthDialog);

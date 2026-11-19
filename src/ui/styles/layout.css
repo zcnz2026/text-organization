@@ -1,8 +1,18 @@
 .app-shell {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   block-size: 100dvh;
   overflow: hidden;
+}
+
+#slot-header,
+#slot-mobile-jump {
+  flex-shrink: 0;
+}
+
+.workbench-grid {
+  flex: 1;
+  min-block-size: 0;
 }
 
 .topbar {
