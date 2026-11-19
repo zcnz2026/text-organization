@@ -27,11 +27,13 @@ import {
 } from "../src/engine/punctuation";
 import {
   aggregateHymnSublinesForBlock,
+  findArticleInCatalog,
   locateParagraphInManuscript,
   normMatchKey,
   resolveCitationText,
 } from "../src/engine/text-matcher";
 import { parseDocxDocumentXml } from "../src/google/docx-drive-client";
+import { parseGoogleResourceUrl } from "../src/google/url-parser";
 import type { ScriptRow } from "../src/types/domain";
 import { DEFAULT_LANG_SHEET_COLS } from "../src/types/schema-config";
 
@@ -702,5 +704,73 @@ describe("Custom SourceScriptColumnConfig remapped columns", () => {
 
     expect(out.rows[0].targetLanguage).toBe("Всемогутній Бог каже:");
     expect(out.rows[0].status).toBe("matched");
+  });
+
+  it("disambiguates same-title articles across Vol.6 vs Vol.7 and parses drive.google.com/open?id= URLs", () => {
+    const parsedUrl = parseGoogleResourceUrl(
+      "https://drive.google.com/open?id=1tJc8nsQfpCTDpAQfjnM6V8WblmvYrNQ5&usp=drive_fs",
+      "doc",
+    );
+    expect(parsedUrl).toEqual({ kind: "doc", id: "1tJc8nsQfpCTDpAQfjnM6V8WblmvYrNQ5", gid: null });
+
+    const matched = findArticleInCatalog(
+      [
+        {
+          zhBracketCite: "《话・卷六　关于追求真理・怎样追求真理（三）》",
+          zhSubtitleCite: "——《话・卷六　关于追求真理・怎样追求真理（三）》",
+          zhTitle: "怎样追求真理（三）",
+          enTitle: "How to Pursue the Truth (3)",
+          targetTitle: "Як прагнути до істини (3)",
+          docUrl: "https://docs.google.com/document/d/vol6_doc_id",
+          targetCite: "«Слово, т. 6. ...»",
+        },
+        {
+          zhBracketCite: "《话・卷七　关于追求真理・怎样追求真理（三）》",
+          zhSubtitleCite: "——《话・卷七　关于追求真理・怎样追求真理（三）》",
+          zhTitle: "怎样追求真理（三）",
+          enTitle: "How to Pursue the Truth (3)",
+          targetTitle: "Як прагнути до істини (3)",
+          docUrl: "https://drive.google.com/open?id=1tJc8nsQfpCTDpAQfjnM6V8WblmvYrNQ5&usp=drive_fs",
+          targetCite: "«Слово, т. 7. ...»",
+        },
+      ],
+      "卷七　关于追求真理・怎样追求真理（三）",
+    );
+    expect(matched?.docUrl).toContain("1tJc8nsQfpCTDpAQfjnM6V8WblmvYrNQ5");
+  });
+
+  it("parses shifted Indonesian hymn sheet (B/C/D) both via per-lang config and auto-header detection", () => {
+    const cfg = parseCloudConfigSheets(
+      new Map<string, RichSheetGrid>([
+        [
+          CONFIG_TEMPLATE_SHEET_NAMES.cols,
+          toRichGrid([
+            ["语系", "表格名称", "表头行", "列1", "列2", "列3"],
+            ["印尼语(说明)", "诗歌LRC摘自", "表头行", "中文", "英文", "外文"],
+            ["印尼语", "诗歌LRC摘自", "2", "B", "C", "D"],
+          ]),
+        ],
+      ]),
+    );
+    expect(cfg.colsByLang["印尼语"].hymnZhCol).toBe("B");
+    expect(cfg.colsByLang["印尼语"].hymnEnCol).toBe("C");
+    expect(cfg.colsByLang["印尼语"].hymnTargetCol).toBe("D");
+
+    const idHymnGrid = toRichGrid([
+      ["", "20261103通知外文排查", "", ""],
+      ["", "中文", "英文", "印尼语"],
+      ["", "神话诗歌标题：", "", ""],
+      ["", "《神希望能追求真理剩存下来》", "God Wishes Man Will Pursue the Truth and Survive", "Tuhan Berharap Manusia Akan Mengejar Kebenaran dan Bertahan Hidup"],
+      ["", "教会诗歌：", "", ""],
+      ["", "《神的话语都是真理》", "All God's Words Are the Truth", "Semua Firman Tuhan Adalah Kebenaran"],
+      ["", "I", "1", ""],
+      ["", "神来在人间与人同生活，发表了许多真理，", "God has come to earth to live with man, expressing many truths.", "Tuhan telah datang ke bumi untuk hidup bersama manusia, mengungkapkan banyak kebenaran."],
+    ]);
+    // Works even with default A/B/C config thanks to auto-header shift detection
+    const hymns = parseHymnSheet(idHymnGrid);
+    expect(hymns).toHaveLength(2);
+    expect(hymns[1].zhTitle).toBe("神的话语都是真理");
+    expect(hymns[1].targetTitle).toBe("Semua Firman Tuhan Adalah Kebenaran");
+    expect(hymns[1].lines).toHaveLength(1);
   });
 });

@@ -30,6 +30,22 @@ function normBibleRef(s: string): string {
     .trim();
 }
 
+const ZH_VOL_DIGITS: Record<string, number> = {
+  一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9,
+  "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9,
+};
+
+function extractVolumeNumber(...texts: string[]): number | null {
+  for (const raw of texts) {
+    const s = raw || "";
+    const zh = /卷\s*([一二三四五六七八九1-9])/u.exec(s);
+    if (zh && ZH_VOL_DIGITS[zh[1]]) return ZH_VOL_DIGITS[zh[1]];
+    const en = /\bvol\.?\s*(\d+)\b/i.exec(s);
+    if (en) return Number.parseInt(en[1], 10);
+  }
+  return null;
+}
+
 export function findArticleInCatalog(
   articles: ArticleCatalogEntry[],
   filterHint: string,
@@ -46,26 +62,40 @@ export function findArticleInCatalog(
     .replace(/[).]+$/g, "")
     .trim();
   const enKey = normMatchKey(enClean);
+  const wantVol = extractVolumeNumber(filterHint, zhCite, enCite);
 
-  for (const a of articles) {
-    const aZh = normMatchKey(a.zhTitle);
-    const aEn = normMatchKey(a.enTitle);
-    const aSub = normMatchKey(a.zhSubtitleCite);
-    const aBrk = normMatchKey(a.zhBracketCite);
-    if (leafKey && aZh && (aZh === leafKey || aZh.endsWith(leafKey))) return a;
-    if (enKey && aEn && aEn === enKey) return a;
-    if (fullKey && aSub && aSub.includes(leafKey) && leafKey.length >= 4) return a;
-    if (fullKey && aBrk && aBrk.includes(leafKey) && leafKey.length >= 4) return a;
-  }
-
-  if (zhCite.includes("……") || zhCite.includes("...")) {
-    const [prefix, suffix] = leafZh.split(/……|\.\.\./).map(normMatchKey);
-    for (const a of articles) {
+  const searchIn = (pool: ArticleCatalogEntry[]): ArticleCatalogEntry | null => {
+    for (const a of pool) {
       const aZh = normMatchKey(a.zhTitle);
-      if (prefix && aZh.includes(prefix) && (!suffix || aZh.endsWith(suffix))) return a;
+      const aEn = normMatchKey(a.enTitle);
+      const aSub = normMatchKey(a.zhSubtitleCite);
+      const aBrk = normMatchKey(a.zhBracketCite);
+      if (leafKey && aZh && (aZh === leafKey || aZh.endsWith(leafKey))) return a;
+      if (enKey && aEn && aEn === enKey) return a;
+      if (fullKey && aSub && aSub.includes(leafKey) && leafKey.length >= 4) return a;
+      if (fullKey && aBrk && aBrk.includes(leafKey) && leafKey.length >= 4) return a;
     }
+
+    if (zhCite.includes("……") || zhCite.includes("...")) {
+      const [prefix, suffix] = leafZh.split(/……|\.\.\./).map(normMatchKey);
+      for (const a of pool) {
+        const aZh = normMatchKey(a.zhTitle);
+        if (prefix && aZh.includes(prefix) && (!suffix || aZh.endsWith(suffix))) return a;
+      }
+    }
+    return null;
+  };
+
+  if (wantVol !== null) {
+    const sameVolPool = articles.filter((a) => {
+      const aVol = extractVolumeNumber(a.zhBracketCite, a.zhSubtitleCite, a.enTitle);
+      return aVol === wantVol;
+    });
+    const exactVolHit = searchIn(sameVolPool);
+    if (exactVolHit) return exactVolHit;
   }
-  return null;
+
+  return searchIn(articles);
 }
 
 export function locateParagraphInManuscript(

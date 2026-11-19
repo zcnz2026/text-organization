@@ -181,10 +181,26 @@ export function parseHymnSheet(
 ): HymnEntry[] {
   const hymns: HymnEntry[] = [];
   const m = { ...DEFAULT_LANG_SHEET_COLS, ...cfg };
-  const colZh = colLetterToIndex(m.hymnZhCol, 0);
-  const colEn = colLetterToIndex(m.hymnEnCol, 1);
-  const colTarget = colLetterToIndex(m.hymnTargetCol, 2);
+  let colZh = colLetterToIndex(m.hymnZhCol, 0);
+  let colEn = colLetterToIndex(m.hymnEnCol, 1);
+  let colTarget = colLetterToIndex(m.hymnTargetCol, 2);
+
+  // Auto-detect shifted columns (e.g. A blank, B=中文, C=英文, D=印尼语) when header says so
+  for (let r = 0; r < Math.min(grid.length, 5); r += 1) {
+    const row = grid[r] ?? [];
+    const zhIdx = row.findIndex((c) => /^中文$|^chinese$/i.test((c?.text ?? "").trim()));
+    const enIdx = row.findIndex((c) => /^英文$|^english$/i.test((c?.text ?? "").trim()));
+    if (zhIdx >= 0 && enIdx > zhIdx && (zhIdx !== colZh || enIdx !== colEn)) {
+      colZh = zhIdx;
+      colEn = enIdx;
+      const tgIdx = row.findIndex((c, idx) => idx > enIdx && (c?.text ?? "").trim().length > 0);
+      colTarget = tgIdx > enIdx ? tgIdx : enIdx + 1;
+      break;
+    }
+  }
+
   let current: HymnEntry | null = null;
+  let inWordHymnSection = false;
   let currentIsWordHymnTitleOnly = false;
 
   for (let r = 0; r < grid.length; r += 1) {
@@ -192,7 +208,7 @@ export function parseHymnSheet(
     const c1 = txt(grid, r, colEn);
     const c2 = txt(grid, r, colTarget);
     if (!c0 && !c1 && !c2) continue;
-    if (r < 3 && (/中文|chinese/i.test(c0) || /英文|english/i.test(c1)) && !/^《/.test(c0) && !/诗歌[：:]/.test(c0)) continue;
+    if (r < 4 && (/^中文$|^chinese$/i.test(c0) || /^英文$|^english$/i.test(c1))) continue;
     if (STANZA_RE.test(c0) && (!c1 || STANZA_RE.test(c1)) && (!c2 || STANZA_RE.test(c2))) continue;
 
     const isCitationRow =
@@ -207,15 +223,23 @@ export function parseHymnSheet(
 
     const isWordBanner = /^神话语?诗歌(?:标题)?[：:]/u.test(c0);
     const isChurchBanner = /^教会诗歌(?:标题)?[：:]/u.test(c0);
+    if (isWordBanner) inWordHymnSection = true;
+    if (isChurchBanner) inWordHymnSection = false;
+
     if (
       isWordBanner ||
       isChurchBanner ||
       /^《.+》$/.test(c0) ||
       (c0 && c1 && c2 && c0.length < 40 && !/[，。,.!?！？；;]/.test(c0))
     ) {
-      current = { zhTitle: stripHymnBanner(c0), enTitle: stripHymnBanner(c1), targetTitle: stripHymnBanner(c2), lines: [] };
-      currentIsWordHymnTitleOnly = isWordBanner;
-      if (current.zhTitle || current.enTitle || current.targetTitle) hymns.push(current);
+      const zhTitle = stripHymnBanner(c0);
+      const enTitle = stripHymnBanner(c1);
+      const targetTitle = stripHymnBanner(c2);
+      if (zhTitle || enTitle || targetTitle) {
+        current = { zhTitle, enTitle, targetTitle, lines: [] };
+        currentIsWordHymnTitleOnly = isWordBanner || inWordHymnSection;
+        hymns.push(current);
+      }
       continue;
     }
 

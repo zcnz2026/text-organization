@@ -5,7 +5,8 @@ export interface ParsedGoogleUrl {
 }
 
 const SHEET_RE = /docs\.google\.com\/spreadsheets\/d\/([A-Za-z0-9_-]{15,})/i;
-const DOC_RE = /(?:docs\.google\.com\/document\/d\/|drive\.google\.com\/file\/d\/)([A-Za-z0-9_-]{15,})/i;
+const DOC_RE =
+  /(?:docs\.google\.com\/document\/d\/|drive\.google\.com\/file\/d\/|drive\.google\.com\/(?:open|uc)\?[^#]*\bid=)([A-Za-z0-9_-]{15,})/i;
 const BARE_ID_RE = /^[A-Za-z0-9_-]{25,64}$/;
 const GID_RE = /[?#&]gid=(\d+)/i;
 

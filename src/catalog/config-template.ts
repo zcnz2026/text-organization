@@ -252,7 +252,7 @@ function applyColumnRow(
     sharedSheets.wordCitationsEnBandCol = colVal(vals[4], sharedSheets.wordCitationsEnBandCol);
     return;
   }
-  if (t.includes("诗歌LRC") || t.includes("诗歌摘自")) {
+  if (isDefault && (t.includes("诗歌LRC") || t.includes("诗歌摘自"))) {
     sharedSheets.hymnCitationsHeaderRow = intVal(vals[0], sharedSheets.hymnCitationsHeaderRow);
     sharedSheets.hymnCitationsZhCol = colVal(vals[1], sharedSheets.hymnCitationsZhCol);
     sharedSheets.hymnCitationsEnCol = colVal(vals[2], sharedSheets.hymnCitationsEnCol);
