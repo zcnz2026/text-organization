@@ -70,17 +70,6 @@ export class GeminiPoolClient {
     input: GeminiCallInput,
   ): Promise<T> {
     const isVertexKey = apiKey.startsWith("AQ.");
-    const endpoint = isVertexKey
-      ? `https://aiplatform.googleapis.com/v1/publishers/google/models/${encodeURIComponent(this.model)}:generateContent?key=${encodeURIComponent(apiKey)}`
-      : `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`;
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (!isVertexKey) {
-      headers["x-goog-api-key"] = apiKey;
-    }
-
     const body = {
       systemInstruction: {
         parts: [{ text: input.systemInstruction }],
@@ -98,35 +87,62 @@ export class GeminiPoolClient {
       },
     };
 
-    const resp = await this.fetchFn(endpoint, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-    });
-
-    if (!resp.ok) {
-      const rawErr = await resp.text().catch(() => "");
-      let detail = "";
-      try {
-        const j = JSON.parse(rawErr) as { error?: { message?: string; status?: string } };
-        detail = j.error?.message || j.error?.status || rawErr.slice(0, 180);
-      } catch {
-        detail = rawErr.slice(0, 180);
+    const callEndpoint = async (endpoint: string, headers: Record<string, string>) => {
+      const resp = await this.fetchFn(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        const rawErr = await resp.text().catch(() => "");
+        let detail = "";
+        try {
+          const j = JSON.parse(rawErr) as { error?: { message?: string; status?: string } };
+          detail = j.error?.message || j.error?.status || rawErr.slice(0, 180);
+        } catch {
+          detail = rawErr.slice(0, 180);
+        }
+        return { ok: false as const, status: resp.status, detail };
       }
-      throw new Error(`Gemini HTTP ${resp.status}${detail ? `: ${detail}` : ""}`);
+      const data = (await resp.json()) as {
+        candidates?: Array<{
+          content?: { parts?: Array<{ text?: string }> };
+        }>;
+      };
+      const rawText =
+        data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+      if (!rawText.trim()) {
+        return { ok: false as const, status: 500, detail: "Gemini 返回空内容" };
+      }
+      return { ok: true as const, value: JSON.parse(rawText) as T };
+    };
+
+    const aiStudioUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`;
+    const vertexUrl = `https://aiplatform.googleapis.com/v1/publishers/google/models/${encodeURIComponent(this.model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+    if (!isVertexKey) {
+      const r = await callEndpoint(aiStudioUrl, {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      });
+      if (r.ok) return r.value;
+      throw new Error(`Gemini HTTP ${r.status}${r.detail ? `: ${r.detail}` : ""}`);
     }
 
-    const data = (await resp.json()) as {
-      candidates?: Array<{
-        content?: { parts?: Array<{ text?: string }> };
-      }>;
-    };
-    const rawText =
-      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ??
-      "";
-    if (!rawText.trim()) {
-      throw new Error("Gemini 返回空内容");
+    // For AQ. keys: try AI Studio first if Vertex is blocked/unbilled, or Vertex then AI Studio
+    const vRes = await callEndpoint(vertexUrl, { "Content-Type": "application/json" });
+    if (vRes.ok) return vRes.value;
+    if (vRes.status === 403 || vRes.status === 404) {
+      const sRes = await callEndpoint(aiStudioUrl, {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      });
+      if (sRes.ok) return sRes.value;
     }
-    return JSON.parse(rawText) as T;
+    const hint =
+      /requires billing/i.test(vRes.detail)
+        ? "（该 AQ. 密钥属于 Vertex AI，需开启 Google Cloud 结算；若要免费使用 Gemini 3.5/3.1 Flash Lite，请改用 Google AI Studio 生成的 AIza... 密钥）"
+        : "";
+    throw new Error(`Gemini HTTP ${vRes.status}: ${vRes.detail}${hint}`);
   }
 }
