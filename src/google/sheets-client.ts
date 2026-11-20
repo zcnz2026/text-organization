@@ -155,9 +155,8 @@ export class GoogleSheetsClient {
       cleanHint && cleanHint !== "AUTO"
         ? colLetterToIndex(cleanHint, maxBaseCols)
         : maxBaseCols;
-    const hasBibleSource = run.rows.some((r) => Boolean(r.bibleSource));
-    const bibleSourceColIdx = hasBibleSource ? hintColIdx + 1 : -1;
-    const totalCols = Math.max(maxBaseCols + 1, hintColIdx + 1, bibleSourceColIdx + 1);
+    const bibleSourceColIdx = hintColIdx + 1;
+    const totalCols = Math.max(maxBaseCols + 2, bibleSourceColIdx + 1);
     const totalRows = doc.headerRows.length + doc.rows.length + 2;
 
     let finalTitle = sheetTitle.slice(0, 95);
@@ -235,15 +234,11 @@ export class GoogleSheetsClient {
           range: `${qTitle}!${hintColL}${headerRowNum}:${hintColL}${endDataRow}`,
           values: [["【工具提示】"], ...run.rows.map((r) => [r.hint || ""])],
         },
-      ];
-
-      if (hasBibleSource && bibleSourceColIdx >= 0) {
-        const srcColL = indexToColLetter(bibleSourceColIdx);
-        valueRanges.push({
-          range: `${qTitle}!${srcColL}${headerRowNum}:${srcColL}${endDataRow}`,
+        {
+          range: `${qTitle}!${indexToColLetter(bibleSourceColIdx)}${headerRowNum}:${indexToColLetter(bibleSourceColIdx)}${endDataRow}`,
           values: [["【圣经来源】"], ...run.rows.map((r) => [r.bibleSource || ""])],
-        });
-      }
+        },
+      ];
 
       await this.request(
         `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(outputSpreadsheetId)}/values:batchUpdate`,
@@ -324,9 +319,7 @@ export class GoogleSheetsClient {
         const padded = [...hr];
         while (padded.length < totalCols) padded.push("");
         padded[hintColIdx] = idx === doc.headerRows.length - 1 ? "【工具提示】" : "";
-        if (hasBibleSource && bibleSourceColIdx >= 0) {
-          padded[bibleSourceColIdx] = idx === doc.headerRows.length - 1 ? "【圣经来源】" : "";
-        }
+        padded[bibleSourceColIdx] = idx === doc.headerRows.length - 1 ? "【圣经来源】" : "";
         return padded;
       });
 
@@ -338,9 +331,7 @@ export class GoogleSheetsClient {
         rowArr[doc.columnMap.targetLanguage] = res.targetLanguage;
         rowArr[doc.columnMap.note] = res.note;
         rowArr[hintColIdx] = res.hint || "";
-        if (hasBibleSource && bibleSourceColIdx >= 0) {
-          rowArr[bibleSourceColIdx] = res.bibleSource || "";
-        }
+        rowArr[bibleSourceColIdx] = res.bibleSource || "";
         outValues.push(rowArr);
       }
 
@@ -382,7 +373,7 @@ export class GoogleSheetsClient {
             startRowIndex: doc.headerRows.length - 1,
             endRowIndex: doc.headerRows.length,
             startColumnIndex: hintColIdx,
-            endColumnIndex: hasBibleSource ? bibleSourceColIdx + 1 : hintColIdx + 1,
+            endColumnIndex: bibleSourceColIdx + 1,
           },
           cell: {
             userEnteredFormat: {

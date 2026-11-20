@@ -392,10 +392,10 @@ function subseqCoverage(shorter: string, longer: string): number {
   return i / longer.length;
 }
 
-function lyricKeyScore(a: string, b: string): number {
+function lyricKeyScore(a: string, b: string, allowDouble = true): number {
   if (!a || !b) return 0;
   if (a === b) return 1;
-  if (a === b + b || b === a + a) return 0.96;
+  if (allowDouble && (a === b + b || b === a + a)) return 0.96;
   const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
   if (shorter.length < 4) return 0;
   if (longer.includes(shorter)) return shorter.length / longer.length;
@@ -425,8 +425,12 @@ export function aggregateHymnSublinesForBlock(
           accZh += normMatchKey(hl.chinese);
           accEn += normMatchKey(hl.english);
           targets.push(stripOuterDoubleQuotes(hl.target).trim());
-          const score = Math.max(lyricKeyScore(accZh, kZh), lyricKeyScore(accEn, kEn));
-          if (score >= 0.78 && (!best || score > best.score)) {
+          // Only allow single-line sung-twice shortcut when span === 1; never merge 2 separate repeated LRC rows into 1 non-repeated script row!
+          const score = Math.max(
+            lyricKeyScore(accZh, kZh, span === 1),
+            lyricKeyScore(accEn, kEn, span === 1),
+          );
+          if (score >= 0.78 && (!best || score > best.score + 0.02)) {
             best = { text: targets.filter(Boolean).join(" "), nextIdx: startIdx + span, score };
             if (score >= 0.99) return best;
           }

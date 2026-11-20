@@ -19,8 +19,23 @@ function isSubtitleRow(row: ScriptRow): boolean {
   return ch === "subtitle" || ln === "subtitle";
 }
 
+const BIBLE_BOOK_OR_CAT_RE =
+  /圣经|新约|旧约|经文|创世记|出埃及记|利未记|民数记|申命记|约书亚记|士师记|路得记|撒母耳记|列王纪|历代志|以斯拉记|尼希米记|以斯帖记|约伯记|诗篇|箴言|传道书|雅歌|以赛亚书|耶利米|以西结书|但以理书|何西阿书|约珥书|阿摩司书|俄巴底亚书|约拿书|弥迦书|那鸿书|哈巴谷书|西番雅书|哈该书|撒迦利亚书|玛拉基书|马太福音|马可福音|路加福音|约翰福音|使徒行传|罗马书|哥林多|加拉太书|以弗所书|腓立比书|歌罗西书|帖撒罗尼迦|提摩太|提多书|腓利门书|希伯来书|雅各书|彼得[前后]书|约翰[一二三]书|犹大书|启示录/u;
+
 function isBibleCategory(filt: string): boolean {
-  return /^(新约|旧约|圣经)$/u.test(filt.trim());
+  const f = filt.trim();
+  if (!f || f.includes("神话") || f.includes("诗歌")) return false;
+  return BIBLE_BOOK_OR_CAT_RE.test(f);
+}
+
+function extractInlineBibleRef(row: ScriptRow): string {
+  const en = row.english.trim();
+  const enM = /\(([1-3]?\s*[A-Za-z][A-Za-z\s.]*?\d+[:.]\d+[^()]*)\)[.,;"”']*$/i.exec(en);
+  if (enM) return enM[1].trim();
+  const zh = row.chinese.trim();
+  const zhM = /[（(]([^）()]+\d+[:：]\d+[^）()]*)[）)][，,。.；”"]*$/u.exec(zh);
+  if (zhM) return zhM[1].trim();
+  return "";
 }
 
 function isBibleCitationRow(row: ScriptRow): boolean {
@@ -127,10 +142,13 @@ export function classifyScriptTasks(rows: ScriptRow[]): ExtractionTask[] {
         i += 1;
       }
       if (verseIndices.length > 0) {
+        const inlineRef =
+          extractInlineBibleRef(rows[verseIndices[verseIndices.length - 1]]) ||
+          extractInlineBibleRef(rows[verseIndices[0]]);
         const refHint =
           citationRowIndex !== undefined
             ? rows[citationRowIndex].english || rows[citationRowIndex].chinese
-            : filt;
+            : inlineRef || filt;
         tasks.push({
           id: nextId("bible"),
           kind: "bible_verses",

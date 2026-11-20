@@ -238,6 +238,7 @@ export async function createSyntheticDemoState(): Promise<{
         english: "For what I would, that do I not; but what I hate, that do I.",
         targetText:
           "«Бо те, чого хочу, не роблю, а те, що ненавиджу, роблю» (Римлян 7:15).",
+        source: "圣经网",
       },
     ],
     idioms: [

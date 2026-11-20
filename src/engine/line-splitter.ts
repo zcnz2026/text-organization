@@ -86,6 +86,15 @@ export function formatIndexedTokens(tokens: string[]): string {
   return tokens.map((t, i) => `[${i}]${t}`).join(" ");
 }
 
+function hasNonLeadingOmission(row: ScriptRow): boolean {
+  if (row.remark.includes("有省略")) return true;
+  const stripLead = (s: string) =>
+    (s || "").trim().replace(/^["“«„'‘(\[\s]*(?:……|\.\.\.|…|\[\.\.\.\]|\(\.\.\.\))\s*/u, "");
+  const zhRest = stripLead(row.chinese);
+  const enRest = stripLead(row.english);
+  return zhRest.includes("……") || enRest.includes("…") || enRest.includes("...");
+}
+
 function encodeThaiDoubleSpaces(text: string, rule: PunctuationRule): string {
   if (rule.langCode !== "th") return text;
   return text.replace(/ {2,}/g, " @ ");
@@ -178,11 +187,7 @@ export function sliceTokensBySpans(
       chunk = capitalizeFirstLetter(chunk);
     }
     const wantsEllipsis =
-      !suppressAutoEllipsis &&
-      (sp.ellipsis ||
-        row.remark.includes("有省略") ||
-        row.chinese.includes("……") ||
-        row.english.includes("…"));
+      !suppressAutoEllipsis && (sp.ellipsis || hasNonLeadingOmission(row));
     if (wantsEllipsis && !chunk.endsWith(rule.ellipsis) && !chunk.endsWith("...") && !chunk.endsWith("…")) {
       chunk = `${chunk} ${rule.ellipsis}`;
     }
@@ -308,9 +313,10 @@ export function deterministicSplitLines(
 
     let chunk = words.slice(wordCursor, bestEnd).join(" ");
     if (
-      (sourceRows[i].remark.includes("有省略") || sourceRows[i].chinese.includes("……") || sourceRows[i].english.includes("…")) &&
+      hasNonLeadingOmission(sourceRows[i]) &&
       !chunk.endsWith(rule.ellipsis) &&
-      !chunk.endsWith("...")
+      !chunk.endsWith("...") &&
+      !chunk.endsWith("…")
     ) {
       chunk = `${chunk} ${rule.ellipsis}`;
     }

@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { BUILTIN_PUNCTUATION_RULES, resolvePunctuationRule } from "../src/catalog/lang-presets";
 import { parseBibleLibrarySheet } from "../src/catalog/sheet-parsers";
+import { parseGridToScriptDocument } from "../src/engine/csv-sheet";
 import { sliceTokensBySpans, tokenizeForIndexing } from "../src/engine/line-splitter";
+import { runLanguageExtractionPipeline } from "../src/engine/pipeline";
 import { formatBibleBlockAndCitation, formatQuotedBlockLines } from "../src/engine/punctuation";
 import { findBibleVerse, locateParagraphInManuscript } from "../src/engine/text-matcher";
+import { buildMultiSheetXlsx } from "../src/engine/xlsx-export";
 import type { ScriptRow } from "../src/types/domain";
+import { createSyntheticDemoState } from "../src/ui/demo-fixture";
 
 function makeRow(rowIndex: number, chinese: string, english: string, remark = ""): ScriptRow {
   return {
@@ -150,5 +154,70 @@ describe("v0.2.7 feedback fixes", () => {
 
     const hit = findBibleVerse(entries, "Genesis 1:1", [makeRow(1, "起初，神创造天地。", "In the beginning...")]);
     expect(hit?.source).toBe("圣经网");
+
+    // Also auto-detects "圣经网或译者翻译" / "版本备注" header when bibleSourceCol is omitted ("")
+    const autoEntries = parseBibleLibrarySheet(grid, {
+      bibleHeaderRow: 1,
+      bibleChapterCol: "B",
+      bibleZhCol: "C",
+      bibleEnCol: "D",
+      bibleTargetCol: "E",
+      bibleSourceCol: "",
+    });
+    expect(autoEntries[0].source).toBe("圣经网");
+  });
+
+  it("extracts inline single-row Bible verses without dropping trailing citation and populates demo bibleSource", async () => {
+    const { doc, runs } = await createSyntheticDemoState();
+    const uk = runs.get("乌克兰语")!;
+    const bibleRows = uk.rows.filter((r) => Boolean(r.bibleSource));
+    expect(bibleRows.length).toBeGreaterThanOrEqual(2);
+    expect(bibleRows[0].bibleSource).toBe("圣经网");
+
+    // Verify full-sentence split hint on multi-row God's words block in demo
+    const splitHintRow = uk.rows.find((r) => r.hint.includes("完整原文："));
+    expect(splitHintRow).toBeDefined();
+
+    // Verify xlsx always contains both 【工具提示】 and 【圣经来源】 headers
+    const xlsxBytes = buildMultiSheetXlsx(doc, [uk]);
+    const xlsxStr = new TextDecoder().decode(xlsxBytes);
+    expect(xlsxStr).toContain("【工具提示】");
+    expect(xlsxStr).toContain("【圣经来源】");
+    expect(xlsxStr).toContain("圣经网");
+
+    // Verify inline single-row Bible citation is preserved when there is no separate Subtitle row
+    const inlineGrid = [
+      ["Line", "In Time", "Out Time", "Character", "Chinese", "English底", "Target Language", "Note", "备注", "送翻备注", "筛选列", "需要摘"],
+      ["10", "", "", "Host", "“起初，神创造天地。”（创1:1）", '"In the beginning God created the heaven and the earth." (Genesis 1:1).', "No need to translate!", "", "", "", "创世记 1:1", "需要摘"],
+    ];
+    const inlineDoc = parseGridToScriptDocument(inlineGrid, "inline-bible");
+    const inlineOut = await runLanguageExtractionPipeline(
+      inlineDoc,
+      {
+        langName: "乌克兰语",
+        rule: resolvePunctuationRule("乌克兰语"),
+        godSaysText: "",
+        commonFixedTerms: new Map(),
+        citations: [],
+        articles: [],
+        articleDocsCache: new Map(),
+        bibleEntries: [
+          {
+            chapterRef: "Genesis 1:1",
+            chinese: "“起初，神创造天地。”（创1:1）",
+            english: '"In the beginning God created the heaven and the earth" (Genesis 1:1).',
+            targetText: "«На початку Бог створив Небо та землю» (Буття 1:1).",
+            source: "圣经网",
+          },
+        ],
+        idioms: [],
+        hymns: [],
+        lordsPrayer: [],
+        rosterEntries: [],
+      },
+      { enableRosterPreFill: false },
+    );
+    expect(inlineOut.rows[0].targetLanguage).toBe("«На початку Бог створив Небо та землю» (Буття 1:1).");
+    expect(inlineOut.rows[0].bibleSource).toBe("圣经网");
   });
 });

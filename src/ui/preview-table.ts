@@ -205,6 +205,7 @@ export function renderPreviewStage(
       const enText = cleanCellText(r.english);
       const tgText = cleanCellText(res.targetLanguage);
       const noteText = cleanCellText(res.note);
+      const bibleSrcText = cleanCellText(res.bibleSource || "");
 
       return `
         <tr>
@@ -213,9 +214,10 @@ export function renderPreviewStage(
           <td data-col="角色/类型" title="${esc(r.character)}"><div class="cell-clip">${esc(cleanCellText(r.character))}</div></td>
           <td data-col="中文原稿" title="${esc(zhText)}"><div class="cell-clip">${esc(zhText)}</div></td>
           <td data-col="English 底稿" class="col-source-end" title="${esc(enText)}"><div class="cell-clip">${esc(enText)}</div></td>
-          <td data-col="目标语种译文" class="${cellCls}" title="${esc(tgText)}"><div class="editable-cell cell-clip" contenteditable="${Boolean(activeRun)}" data-edit-row="${r.rowIndex}" data-edit-field="targetLanguage" spellcheck="false">${esc(tgText)}</div></td>
+          <td data-col="目标语种译文" title="${esc(tgText)}"><div class="editable-cell cell-clip" contenteditable="${Boolean(activeRun)}" data-edit-row="${r.rowIndex}" data-edit-field="targetLanguage" spellcheck="false">${esc(tgText)}</div></td>
           <td data-col="Note" title="${esc(noteText)}"><div class="editable-cell cell-clip" contenteditable="${Boolean(activeRun)}" data-edit-row="${r.rowIndex}" data-edit-field="note" spellcheck="false">${esc(noteText)}</div></td>
           <td data-col="工具提示" class="${cellCls}" title="${esc(plainHint)}"><div class="cell-clip">${statusLabel}</div></td>
+          <td data-col="圣经来源" title="${esc(bibleSrcText)}"><div class="editable-cell cell-clip" contenteditable="${Boolean(activeRun)}" data-edit-row="${r.rowIndex}" data-edit-field="bibleSource" spellcheck="false">${esc(bibleSrcText)}</div></td>
         </tr>
       `;
     })
@@ -277,6 +279,7 @@ export function renderPreviewStage(
                   activeLang ? `${activeLang}（摘录结果）` : "Target Language",
                   "Note（提前贴上）",
                   "【工具提示】",
+                  "【圣经来源】",
                 ]
                   .map(
                     (label, idx) =>
@@ -286,7 +289,7 @@ export function renderPreviewStage(
               </tr>
             </thead>
             <tbody>
-              ${rowsHtml || `<tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-muted)">当前筛选条件下没有匹配的行</td></tr>`}
+              ${rowsHtml || `<tr><td colspan="9" style="text-align:center;padding:2rem;color:var(--text-muted)">当前筛选条件下没有匹配的行</td></tr>`}
             </tbody>
           </table>
         </div>
@@ -389,7 +392,7 @@ export function renderPreviewStage(
     container.querySelectorAll<HTMLElement>("[data-edit-row]").forEach((cell) => {
       cell.addEventListener("blur", () => {
         const rIdx = Number(cell.dataset.editRow);
-        const field = cell.dataset.editField as "targetLanguage" | "note";
+        const field = cell.dataset.editField as "targetLanguage" | "note" | "bibleSource";
         const targetRow = activeRun.rows[rIdx];
         if (!targetRow) return;
         targetRow[field] = cell.innerText;

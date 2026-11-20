@@ -124,7 +124,22 @@ export function parseBibleLibrarySheet(
   let colZh = colLetterToIndex(m.bibleZhCol, 2);
   let colEn = colLetterToIndex(m.bibleEnCol, 3);
   let colTarget = colLetterToIndex(m.bibleTargetCol, 4);
-  const colSource = optColIdx(m.bibleSourceCol, -1);
+  let colSource = optColIdx(m.bibleSourceCol, -1);
+
+  // Auto-detect Bible source/version column by header keywords (e.g. Ukrainian "圣经网或译者翻译", Romanian "版本备注")
+  // whenever bibleSourceCol is not explicitly configured.
+  if (colSource < 0) {
+    for (let r = 0; r < Math.min(grid.length, 4); r += 1) {
+      const row = grid[r] || [];
+      const foundSrc = row.findIndex((c) =>
+        /版本备注|圣经网或译者|译者翻译|圣经来源|版本来源|版本说明/i.test(c.text.trim()),
+      );
+      if (foundSrc >= 0 && foundSrc !== colRef && foundSrc !== colZh && foundSrc !== colEn && foundSrc !== colTarget) {
+        colSource = foundSrc;
+        break;
+      }
+    }
+  }
 
   if (!cfg) {
     startRow = 1;

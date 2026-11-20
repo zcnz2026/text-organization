@@ -287,6 +287,17 @@ async function processSingleTask(
         linesCopy[0] = `${catalog.rule.ellipsis} ${linesCopy[0]}`;
       }
       const formatted = formatBibleBlockAndCitation(linesCopy, matched.targetCitationRef, catalog.rule);
+      // If there is no separate Subtitle citation row and the source row itself ends with an inline (Book chap:verse) reference,
+      // keep the formatted citation attached to the end of the final verse line instead of dropping it!
+      const lastSrcRow = verseRows[verseRows.length - 1];
+      const hasInlineRefInSrc =
+        task.citationRowIndex === undefined &&
+        (/\([^()]+\d+[:.]\d+[^()]*\)[.,;"”']*$/i.test(lastSrcRow.english.trim()) ||
+          /[（(][^）()]+\d+[:：]\d+[^）()]*[）)][，,。.”"]*$/u.test(lastSrcRow.chinese.trim()));
+      if (hasInlineRefInSrc && formatted.verseLines.length > 0 && formatted.citationText) {
+        const li = formatted.verseLines.length - 1;
+        formatted.verseLines[li] = `${formatted.verseLines[li]} ${formatted.citationText}`;
+      }
       const isMulti = task.rowIndices.length > 1;
       task.rowIndices.forEach((rIdx, k) => {
         results[rIdx].targetLanguage = formatted.verseLines[k];
