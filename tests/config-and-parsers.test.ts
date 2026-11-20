@@ -338,27 +338,27 @@ describe("27+ Language Punctuation Presets from 整理剧本各语言标点符�
     // Language-specific sentencePeriodChar: ।, ។, ။, and empty string for Ja/Th
     const hi = resolvePunctuationRule("印地语");
     expect(hi.sentencePeriodChar).toBe("।");
-    expect(formatQuotedBlockLines(["“ईश्वर के वचन सत्य हैं।”"], hi)).toEqual(['"ईश्वर के वचन सत्य हैं।"']);
+    expect(formatQuotedBlockLines(["“आज मौसम बहुत अच्छा है।”"], hi)).toEqual(['"आज मौसम बहुत अच्छा है।"']);
 
     const ne = resolvePunctuationRule("尼泊尔语");
     expect(ne.sentencePeriodChar).toBe("।");
-    expect(formatStandaloneTitle("परमेश्वरका वचनहरू", '"Words."', "《神的话》。", ne)).toBe("“परमेश्वरका वचनहरू।”");
+    expect(formatStandaloneTitle("बिहानको घाम", '"Morning Sun."', "《晨光》。", ne)).toBe("“बिहानको घाम।”");
 
     const km = resolvePunctuationRule("高棉语");
     expect(km.sentencePeriodChar).toBe("។");
-    expect(formatQuotedBlockLines(["«ព្រះបន្ទូលរបស់ព្រះជាម្ចាស់។»"], km)).toEqual(["«ព្រះបន្ទូលរបស់ព្រះជាម្ចាស់។»"]);
+    expect(formatQuotedBlockLines(["«ថ្ងៃនេះអាកាសធាតុល្អ។»"], km)).toEqual(["«ថ្ងៃនេះអាកាសធាតុល្អ។»"]);
 
     const my = resolvePunctuationRule("缅甸语");
     expect(my.sentencePeriodChar).toBe("။");
-    expect(formatQuotedBlockLines(["“ဘုရားသခင်၏ နှုတ်ကပတ်တော်။”"], my)).toEqual(["“ဘုရားသခင်၏ နှုတ်ကပတ်တော်။”"]);
+    expect(formatQuotedBlockLines(["“ဒီနေ့ရာသီဥတုကောင်းတယ်။”"], my)).toEqual(["“ဒီနေ့ရာသီဥတုကောင်းတယ်။”"]);
 
     const ja = resolvePunctuationRule("日语");
     expect(ja.sentencePeriodChar).toBe("");
-    expect(formatQuotedBlockLines(["「神の言葉はすべて真理である。」"], ja)).toEqual(["「神の言葉はすべて真理である」"]);
+    expect(formatQuotedBlockLines(["「今日はとても良い天気です。」"], ja)).toEqual(["「今日はとても良い天気です」"]);
 
     // Nested quote transformation inside block
-    const plOut = formatQuotedBlockLines(["\"To jest 'prawda' Boża.\""], pl);
-    expect(plOut).toEqual(["„To jest »prawda« Boża”."]);
+    const plOut = formatQuotedBlockLines(["\"To jest 'ważna' notatka.\""], pl);
+    expect(plOut).toEqual(["„To jest »ważna« notatka”."]);
   });
 });
 
@@ -369,9 +369,9 @@ describe("parseDocxDocumentXml 3-column table extraction & You(s) matching", () 
         <w:body>
           <w:tbl>
             <w:tr>
-              <w:tc><w:p><w:r><w:t>你们应当真心顺服神，</w:t></w:r><w:del><w:r><w:delText>旧删除文字</w:delText></w:r></w:del><w:r><w:t>尽好本分。</w:t></w:r></w:p></w:tc>
-              <w:tc><w:p><w:r><w:t>You(s) should truly submit to God and fulfill your(s) duty well.</w:t></w:r><w:del><w:r><w:t>DELETED EN</w:t></w:r></w:del></w:p></w:tc>
-              <w:tc><w:p><w:r><w:t>Ви повинні щиро коритися Богові</w:t></w:r><w:del><w:r><w:t>СТАРИЙ ТЕКСТ</w:t></w:r></w:del><w:r><w:t> і добре виконувати свій обов'язок.</w:t></w:r></w:p></w:tc>
+              <w:tc><w:p><w:r><w:t>你们应当认真准备，</w:t></w:r><w:del><w:r><w:delText>旧删除文字</w:delText></w:r></w:del><w:r><w:t>完成这项计划。</w:t></w:r></w:p></w:tc>
+              <w:tc><w:p><w:r><w:t>You(s) should carefully prepare and finish your(s) project well.</w:t></w:r><w:del><w:r><w:t>DELETED EN</w:t></w:r></w:del></w:p></w:tc>
+              <w:tc><w:p><w:r><w:t>Ви повинні старанно підготуватися</w:t></w:r><w:del><w:r><w:t>СТАРИЙ ТЕКСТ</w:t></w:r></w:del><w:r><w:t> і добре завершити свій проєкт.</w:t></w:r></w:p></w:tc>
             </w:tr>
           </w:tbl>
         </w:body>
@@ -380,70 +380,70 @@ describe("parseDocxDocumentXml 3-column table extraction & You(s) matching", () 
 
     const paragraphs = parseDocxDocumentXml(sampleXml, 1, 2, 3);
     expect(paragraphs).toHaveLength(1);
-    expect(paragraphs[0].chinese).toBe("你们应当真心顺服神，尽好本分。");
+    expect(paragraphs[0].chinese).toBe("你们应当认真准备，完成这项计划。");
     expect(paragraphs[0].english).toBe(
-      "You(s) should truly submit to God and fulfill your(s) duty well.",
+      "You(s) should carefully prepare and finish your(s) project well.",
     );
     expect(paragraphs[0].target).toBe(
-      "Ви повинні щиро коритися Богові і добре виконувати свій обов'язок.",
+      "Ви повинні старанно підготуватися і добре завершити свій проєкт.",
     );
 
     // Verify normMatchKey strips (s) so script English without (s) matches .docx English with You(s)/your(s)
-    expect(normMatchKey("You(s) should fulfill your(s) duty")).toBe(
-      normMatchKey("You should fulfill your duty"),
+    expect(normMatchKey("You(s) should finish your(s) project")).toBe(
+      normMatchKey("You should finish your project"),
     );
 
     const scriptRow = makeScriptRow({
       rowIndex: 0,
       chinese: "",
-      english: "You should truly submit to God and fulfill your duty well.",
+      english: "You should carefully prepare and finish your project well.",
     });
     const located = locateParagraphInManuscript(paragraphs, [scriptRow]);
     expect(located).not.toBeNull();
     expect(located?.matchedText).toBe(
-      "Ви повинні щиро коритися Богові і добре виконувати свій обов'язок.",
+      "Ви повинні старанно підготуватися і добре завершити свій проєкт.",
     );
   });
 });
 
 describe("parseLordsPrayerSheet row-per-language & 8-row pipeline splitting", () => {
-  it("parses A=语种, B=整段主祷文 layout and splits cleanly across 8 script rows with final Amen aligned", async () => {
+  it("parses A=语种, B=整段文本 layout and splits cleanly across 8 script rows with final line aligned", async () => {
     const grid = toRichGrid([
-      ["语种", "定稿主祷文全文"],
+      ["语种", "全文"],
       [
         "西班牙语",
-        "¡Oh, Dios Todopoderoso! Tú eres el Señor Jesús que ha regresado, Tú eres Aquel a quien hemos estado esperando. Deseamos seguirte, recibir Tus palabras, Tu provisión y Tu guía. No nos dejes caer en la tentación, y líbranos del maligno, porque Tuyo es el reino, el poder y la gloria, por los siglos de los siglos. ¡Amén!",
+        "¡Buenos días a todos! Hoy comenzamos un nuevo camino juntos, buscando aprender con calma y claridad. Queremos avanzar paso a paso, cuidar cada detalle, escuchar con atención y mantener la armonía. No nos detengamos ante las dudas, sino sigamos adelante con firmeza, porque el esfuerzo constante trae buenos frutos cada día. ¡Amén!",
       ],
     ]);
 
     const parsed = parseLordsPrayerSheet(grid, "西语");
-    expect(parsed.fullText).toContain("¡Oh, Dios Todopoderoso!");
+    expect(parsed.fullText).toContain("¡Buenos días a todos!");
     expect(parsed.fullText.endsWith("¡Amén!")).toBe(true);
 
     const blockRows: ScriptRow[] = [
-      makeScriptRow({ rowIndex: 0, chinese: "全能神啊，", english: "Almighty God," }),
-      makeScriptRow({ rowIndex: 1, chinese: "你是重归的主耶稣，", english: "You are the returned Lord Jesus," }),
-      makeScriptRow({ rowIndex: 2, chinese: "你是我们巴望已久的那一位，", english: "You are the One we have been waiting for," }),
-      makeScriptRow({ rowIndex: 3, chinese: "我们愿跟随你，", english: "We wish to follow You," }),
-      makeScriptRow({ rowIndex: 4, chinese: "接受你的话语、你的供应与你的带领。", english: "to receive Your words, Your provision, and Your leadership." }),
-      makeScriptRow({ rowIndex: 5, chinese: "不叫我们遇见试探，救我们脱离凶恶，", english: "Lead us not into temptation, but deliver us from evil," }),
-      makeScriptRow({ rowIndex: 6, chinese: "因为国度、权柄、荣耀，全是你的，直到永远！", english: "for Yours is the kingdom, and the power, and the glory, forever!" }),
+      makeScriptRow({ rowIndex: 0, chinese: "大家好，", english: "Good morning everyone," }),
+      makeScriptRow({ rowIndex: 1, chinese: "今天我们一起开启新旅程，", english: "Today we begin a new journey together," }),
+      makeScriptRow({ rowIndex: 2, chinese: "以平静清晰的心态去学习，", english: "seeking to learn with calm and clarity," }),
+      makeScriptRow({ rowIndex: 3, chinese: "我们希望一步步前进，", english: "We want to move forward step by step," }),
+      makeScriptRow({ rowIndex: 4, chinese: "关注每个细节并保持和谐。", english: "caring for every detail and keeping harmony." }),
+      makeScriptRow({ rowIndex: 5, chinese: "不要因疑虑而停步，要坚定前行，", english: "Do not stop at doubts, but move forward firmly," }),
+      makeScriptRow({ rowIndex: 6, chinese: "因为持续努力每天都会结出硕果！", english: "for steady effort brings good fruit every day!" }),
       makeScriptRow({ rowIndex: 7, chinese: "阿们！", english: "Amen!" }),
     ];
 
     const esRule = resolvePunctuationRule("西语");
     const split8 = await splitLordsPrayerFullText(parsed.fullText, blockRows, esRule);
     expect(split8).toHaveLength(8);
-    expect(split8[0]).toBe("¡Oh, Dios Todopoderoso!");
+    expect(split8[0]).toBe("¡Buenos días a todos!");
     expect(split8[7]).toBe("¡Amén!");
     expect(split8.every((line) => line.length > 0)).toBe(true);
   });
 });
 
-describe("parseWordCitationsSheet dual-column & 六本书新摘自 H/I citation columns", () => {
-  it("parses dual-column per language in 话在肉身显现摘自202210 and resolves H/I columns from 六本书新摘自", () => {
+describe("parseWordCitationsSheet dual-column & catalog H/I citation columns", () => {
+  it("parses dual-column per language and resolves H/I columns from article catalog", () => {
     const wordCiteGrid = toRichGrid([
-      ["《话在肉身显现》单篇摘自总表", "", "", "", "乌克兰语", "", "西班牙语", ""],
+      ["单篇摘自总表", "", "", "", "乌克兰语", "", "西班牙语", ""],
       [
         "中文破折号",
         "中文字幕带",
@@ -455,67 +455,58 @@ describe("parseWordCitationsSheet dual-column & 六本书新摘自 H/I citation 
         "西语字幕带",
       ],
       [
-        "——《话・卷一　神的显现与作工・基督的实质是顺服天父的旨意》",
-        "《话・卷一　神的显现与作工・基督的实质是顺服天父的旨意》",
-        "(The Word, Vol. 1. The Appearance and Work of God. The Substance of Christ Is Obedience to the Will of the Heavenly Father).",
-        "from The Word, Vol. 1. The Appearance and Work of God. The Substance of Christ Is Obedience to the Will of the Heavenly Father",
-        "(Слово, т. 1. Явлення й робота Бога. Сутність Христа — це покора волі Небесного Отця).",
-        "зі «Слово, т. 1. Явлення й робота Бога. Сутність Христа — це покора волі Небесного Отця»",
-        "(La Palabra, Vol. 1. La aparición y obra de Dios. La sustancia de Cristo es la obediencia a la voluntad del Padre celestial).",
-        "de «La Palabra, Vol. 1. La aparición y obra de Dios. La sustancia de Cristo es la obediencia a la voluntad del Padre celestial»",
+        "——《文集・卷一　总论・第一篇》",
+        "《文集・卷一　总论・第一篇》",
+        "(Collection, Vol. 1. Overview. Essay One).",
+        "from Collection, Vol. 1. Overview. Essay One",
+        "(Збірка, т. 1. Огляд. Нарис 1).",
+        "зі «Збірка, т. 1. Огляд. Нарис 1»",
+        "(Colección, Vol. 1. Resumen. Ensayo 1).",
+        "de «Colección, Vol. 1. Resumen. Ensayo 1»",
       ],
     ]);
 
     const ukPairs = parseWordCitationsSheet(wordCiteGrid, "乌克兰语");
     expect(ukPairs.length).toBeGreaterThanOrEqual(1);
-    expect(ukPairs[0].videoEffect).toBe(
-      "(Слово, т. 1. Явлення й робота Бога. Сутність Христа — це покора волі Небесного Отця).",
-    );
-    expect(ukPairs[0].subtitleBand).toBe(
-      "зі «Слово, т. 1. Явлення й робота Бога. Сутність Христа — це покора волі Небесного Отця»",
-    );
+    expect(ukPairs[0].videoEffect).toBe("(Збірка, т. 1. Огляд. Нарис 1).");
+    expect(ukPairs[0].subtitleBand).toBe("зі «Збірка, т. 1. Огляд. Нарис 1»");
 
     const hymnCiteGrid = toRichGrid([
       ["中文", "英文", "乌克兰语的摘自"],
       [
-        "《跟随羔羊唱新歌・神的话语都是真理》",
-        "from Follow the Lamb and Sing New Songs, All God's Words Are the Truth",
-        "з «Ідіть за Агнцем і співайте нових пісень. Усі Божі слова — це істина»",
+        "《歌集・晨光之歌》",
+        "from Songbook, Song of Morning Light",
+        "з «Пісенник. Пісня ранкового світла»",
       ],
     ]);
     const hymnPairs = parseHymnCitationsSheet(hymnCiteGrid, "乌语");
     expect(hymnPairs).toHaveLength(1);
-    expect(hymnPairs[0].subtitleBand).toContain("Усі Божі слова — це істина");
+    expect(hymnPairs[0].subtitleBand).toContain("Пісня ранкового світла");
 
-    // 六本书新摘自 B~I columns (H = targetCite subtitle_band, I = targetBracketCite video_effect)
     const catalogGrid = toRichGrid([
       ["序号", "中文括号摘自", "中文字幕带摘自", "中文篇目", "英文篇目", "乌语篇目", "单篇链接", "乌语字幕带摘自(H)", "乌语括号特效摘自(I)"],
       [
         "1",
-        "（《话・卷二　关于认识神・独一无二的神自己　三》）",
-        "——《话・卷二　关于认识神・独一无二的神自己　三》",
-        "独一无二的神自己　三",
-        "God Himself, the Unique III",
-        "Сам Бог, Унікальний III",
-        { text: "查看单篇", url: "https://docs.google.com/document/d/doc_unique_3" },
-        "зі «Слово, т. 2. Про пізнання Бога. Сам Бог, Унікальний III»",
-        "(Слово, т. 2. Про пізнання Бога. Сам Бог, Унікальний III).",
+        "（《文集・卷二　专题・第三篇》）",
+        "——《文集・卷二　专题・第三篇》",
+        "第三篇",
+        "Essay Three",
+        "Нарис 3",
+        { text: "查看单篇", url: "https://docs.google.com/document/d/mock_doc_essay_3" },
+        "зі «Збірка, т. 2. Тема. Нарис 3»",
+        "(Збірка, т. 2. Тема. Нарис 3).",
       ],
     ]);
 
     const articles = parseArticleCatalogSheet(catalogGrid, DEFAULT_LANG_SHEET_COLS);
     expect(articles).toHaveLength(1);
-    expect(articles[0].targetCite).toBe(
-      "зі «Слово, т. 2. Про пізнання Бога. Сам Бог, Унікальний III»",
-    );
-    expect(articles[0].targetBracketCite).toBe(
-      "(Слово, т. 2. Про пізнання Бога. Сам Бог, Унікальний III).",
-    );
+    expect(articles[0].targetCite).toBe("зі «Збірка, т. 2. Тема. Нарис 3»");
+    expect(articles[0].targetBracketCite).toBe("(Збірка, т. 2. Тема. Нарис 3).");
 
     const mockCatalog = {
       langName: "乌克兰语",
       rule: resolvePunctuationRule("乌克兰语"),
-      godSaysText: "Всемогутній Бог каже",
+      godSaysText: "",
       commonFixedTerms: new Map<string, string>(),
       citations: [],
       articles,
@@ -529,128 +520,123 @@ describe("parseWordCitationsSheet dual-column & 六本书新摘自 H/I citation 
 
     const citeRow = makeScriptRow({
       rowIndex: 0,
-      chinese: "（《话・卷二　关于认识神・独一无二的神自己　三》）",
-      english: "(The Word, Vol. 2. On Knowing God. God Himself, the Unique III).",
-      filterCategory: "卷二　关于认识神・独一无二的神自己　三",
+      chinese: "（《文集・卷二　专题・第三篇》）",
+      english: "(Collection, Vol. 2. Topic. Essay Three).",
+      filterCategory: "卷二　专题・第三篇",
     });
 
     expect(resolveCitationText(mockCatalog, citeRow, "video_effect")).toBe(
-      "(Слово, т. 2. Про пізнання Бога. Сам Бог, Унікальний III).",
+      "(Збірка, т. 2. Тема. Нарис 3).",
     );
     expect(resolveCitationText(mockCatalog, citeRow, "subtitle_band")).toBe(
-      "зі «Слово, т. 2. Про пізнання Бога. Сам Бог, Унікальний III»",
+      "зі «Збірка, т. 2. Тема. Нарис 3»",
     );
   });
 });
 
-describe("parseHymnSheet (神话诗歌标题 vs 教会诗歌 LRC sub-lines) & 39期 Line 57/58 aggregation", () => {
-  it("keeps 神话诗歌标题 title-only, parses 教会诗歌 LRC sub-lines ignoring stanza markers, and aggregates multi-sublines for 39期 Line 57/58", async () => {
+describe("parseHymnSheet & LRC multi-subline aggregation", () => {
+  it("keeps title-only entries separate, parses LRC sub-lines ignoring stanza markers, and aggregates multi-sublines", async () => {
     const hymnGrid = toRichGrid([
-      ["39期.葡萄牙", "", ""],
+      ["专题一", "", ""],
       ["中文", "英文", "乌克兰语"],
       [
-        "神话诗歌标题：《神主宰着全人类的命运》",
-        "Hymn of God's Words: God Holds Sovereignty Over the Destiny of All Mankind",
-        "Бог володарює над долею всього людства",
+        "神话诗歌标题：《山谷微风》",
+        "Title Only: Valley Breeze",
+        "Вітер у долині",
       ],
       [
-        "作为人类中的一员，",
-        "As members of mankind,",
-        "Як представники людства (不应作为诗歌行收录，应走单篇提取)",
+        "这是不应被收录为歌词的注释行，",
+        "Placeholder line that should stay excluded,",
+        "Рядок-заповнювач",
       ],
       [
-        "教会诗歌：《神的话语都是真理》",
-        "Church Hymn: All God's Words Are the Truth",
-        "Усі Божі слова — це істина",
+        "教会诗歌：《晨光之歌》",
+        "Song: Song of Morning Light",
+        "Пісня ранкового світла",
       ],
       ["I", "I", "I"],
       [
-        "神来在人间与人同生活，发表了许多真理，",
-        "God has come to earth to live with man, expressing many truths.",
-        "Бог прийшов на землю жити з людиною, висловлюючи багато істин.",
+        "清晨阳光洒在青翠的山坡，唤醒沉睡的大地，",
+        "Morning sunlight falls on green hills, waking the sleeping earth.",
+        "Ранкове сонце падає на зелені пагорби, пробуджуючи сплячу землю.",
       ],
       [
-        "从此我不再渺茫中寻觅，",
-        "No longer do I search in uncertainty,",
-        "Відтепер я більше не шукаю в непевності,",
+        "微风吹过清澈的溪水，",
+        "A gentle breeze blows over the clear stream,",
+        "Легкий вітер дме над прозорим струмком,",
       ],
       [
-        "因有神话带领我，",
-        "for I have God's words to guide me.",
-        "бо маю Божі слова, що ведуть мене.",
+        "树叶在阳光下轻轻摇曳，",
+        "while leaves sway softly in the sunlight.",
+        "а листя тихо гойдається на сонці.",
       ],
       [
-        "每天吃喝神话活在神前，",
-        "Each day, I eat and drink God's words and live before God;",
-        "Щодня я їм і п'ю Божі слова та живу перед Богом;",
+        "鸟儿在林间欢快地歌唱，",
+        "Birds sing joyfully in the woods;",
+        "Птахи радісно співають у лісі;",
       ],
       [
-        "有圣灵开启光照，",
-        "the Holy Spirit enlightens and illuminates me.",
-        "Святий Дух просвітлює і осяює мене.",
+        "新的一天充满了希望。",
+        "a new day is full of hope.",
+        "новий день сповнений надії.",
       ],
       [
-        "《跟随羔羊唱新歌・神的话语都是真理》",
-        "from Follow the Lamb and Sing New Songs, All God's Words Are the Truth",
-        "з «Ідіть за Агнцем і співайте нових пісень. Усі Божі слова — це істина»",
+        "《歌集・晨光之歌》",
+        "from Songbook, Song of Morning Light",
+        "з «Пісенник. Пісня ранкового світла»",
       ],
     ]);
 
     const hymns = parseHymnSheet(hymnGrid);
     expect(hymns).toHaveLength(2);
-    expect(hymns[0].zhTitle).toBe("神主宰着全人类的命运");
+    expect(hymns[0].zhTitle).toBe("山谷微风");
     expect(hymns[0].lines).toHaveLength(0);
 
-    expect(hymns[1].zhTitle).toBe("神的话语都是真理");
+    expect(hymns[1].zhTitle).toBe("晨光之歌");
     expect(hymns[1].lines).toHaveLength(5);
-    expect(hymns[1].targetCitation).toBe(
-      "з «Ідіть за Агнцем і співайте нових пісень. Усі Божі слова — це істина»",
-    );
+    expect(hymns[1].targetCitation).toBe("з «Пісенник. Пісня ранкового світла»");
 
-    // 39期 Line 56, 57, 58: Line 57 combines sub-lines 2+3, Line 58 combines sub-lines 4+5
     const blockRows: ScriptRow[] = [
       makeScriptRow({
         rowIndex: 0,
         line: "56",
         character: "Hymn",
-        chinese: "“神来在人间与人同生活，发表了许多真理，",
-        english: '"God has come to earth to live with man, expressing many truths.',
-        filterCategory: "教会诗歌《神的话语都是真理》",
+        chinese: "“清晨阳光洒在青翠的山坡，唤醒沉睡的大地，",
+        english: '"Morning sunlight falls on green hills, waking the sleeping earth.',
+        filterCategory: "诗歌《晨光之歌》",
         needExtract: "需要摘",
       }),
       makeScriptRow({
         rowIndex: 1,
         line: "57",
         character: "Hymn",
-        chinese: "从此我不再渺茫中寻觅，因有神话带领我，",
-        english: "No longer do I search in uncertainty, for I have God's words to guide me.",
-        filterCategory: "教会诗歌《神的话语都是真理》",
+        chinese: "微风吹过清澈的溪水，树叶在阳光下轻轻摇曳，",
+        english: "A gentle breeze blows over the clear stream, while leaves sway softly in the sunlight.",
+        filterCategory: "诗歌《晨光之歌》",
         needExtract: "需要摘",
       }),
       makeScriptRow({
         rowIndex: 2,
         line: "58",
         character: "Hymn",
-        chinese: "每天吃喝神话活在神前，有圣灵开启光照，”",
-        english:
-          'Each day, I eat and drink God\'s words and live before God; the Holy Spirit enlightens and illuminates me."',
-        filterCategory: "教会诗歌《神的话语都是真理》",
+        chinese: "鸟儿在林间欢快地歌唱，新的一天充满了希望。”",
+        english: 'Birds sing joyfully in the woods; a new day is full of hope."',
+        filterCategory: "诗歌《晨光之歌》",
         needExtract: "需要摘",
       }),
     ];
 
     const aggregated = aggregateHymnSublinesForBlock(hymns[1].lines, blockRows);
     expect(aggregated).toEqual([
-      "Бог прийшов на землю жити з людиною, висловлюючи багато істин.",
-      "Відтепер я більше не шукаю в непевності, бо маю Божі слова, що ведуть мене.",
-      "Щодня я їм і п'ю Божі слова та живу перед Богом; Святий Дух просвітлює і осяює мене.",
+      "Ранкове сонце падає на зелені пагорби, пробуджуючи сплячу землю.",
+      "Легкий вітер дме над прозорим струмком, а листя тихо гойдається на сонці.",
+      "Птахи радісно співають у лісі; новий день сповнений надії.",
     ]);
   });
 });
 
 describe("Custom SourceScriptColumnConfig remapped columns", () => {
   it("parses script document with swapped column letters when autoDetectByHeader is false", async () => {
-    // Swapped layout: Row 1 is metadata, Row 2 is custom header, Chinese is in Col B, English in Col A, Line in Col C, Filter in Col D, NeedExtract in Col E, Target in Col F
     const grid: string[][] = [
       ["Meta Row", "", "", "", "", ""],
       ["Col1_EN", "Col2_ZH", "Col3_LINE", "Col4_FILTER", "Col5_EXTRACT", "Col6_TARGET"],
@@ -694,7 +680,7 @@ describe("Custom SourceScriptColumnConfig remapped columns", () => {
       {
         langName: "乌克兰语",
         rule: resolvePunctuationRule("乌克兰语"),
-        godSaysText: "Всемогутній Бог каже",
+        godSaysText: "Тестовий префікс",
         commonFixedTerms: new Map(),
         citations: [],
         articles: [],
@@ -708,41 +694,41 @@ describe("Custom SourceScriptColumnConfig remapped columns", () => {
       { enableRosterPreFill: false },
     );
 
-    expect(out.rows[0].targetLanguage).toBe("Всемогутній Бог каже:");
+    expect(out.rows[0].targetLanguage).toBe("Тестовий префікс:");
     expect(out.rows[0].status).toBe("matched");
   });
 
   it("disambiguates same-title articles across Vol.6 vs Vol.7 and parses drive.google.com/open?id= URLs", () => {
     const parsedUrl = parseGoogleResourceUrl(
-      "https://drive.google.com/open?id=1tJc8nsQfpCTDpAQfjnM6V8WblmvYrNQ5&usp=drive_fs",
+      "https://drive.google.com/open?id=1MockDriveFileIdVol7Example00001&usp=drive_fs",
       "doc",
     );
-    expect(parsedUrl).toEqual({ kind: "doc", id: "1tJc8nsQfpCTDpAQfjnM6V8WblmvYrNQ5", gid: null });
+    expect(parsedUrl).toEqual({ kind: "doc", id: "1MockDriveFileIdVol7Example00001", gid: null });
 
     const matched = findArticleInCatalog(
       [
         {
-          zhBracketCite: "《话・卷六　关于追求真理・怎样追求真理（三）》",
-          zhSubtitleCite: "——《话・卷六　关于追求真理・怎样追求真理（三）》",
-          zhTitle: "怎样追求真理（三）",
-          enTitle: "How to Pursue the Truth (3)",
-          targetTitle: "Як прагнути до істини (3)",
+          zhBracketCite: "《文集・卷六　专题・同名篇目（三）》",
+          zhSubtitleCite: "——《文集・卷六　专题・同名篇目（三）》",
+          zhTitle: "同名篇目（三）",
+          enTitle: "Same Title Essay (3)",
+          targetTitle: "Нарис (3)",
           docUrl: "https://docs.google.com/document/d/vol6_doc_id",
-          targetCite: "«Слово, т. 6. ...»",
+          targetCite: "«Збірка, т. 6. ...»",
         },
         {
-          zhBracketCite: "《话・卷七　关于追求真理・怎样追求真理（三）》",
-          zhSubtitleCite: "——《话・卷七　关于追求真理・怎样追求真理（三）》",
-          zhTitle: "怎样追求真理（三）",
-          enTitle: "How to Pursue the Truth (3)",
-          targetTitle: "Як прагнути до істини (3)",
-          docUrl: "https://drive.google.com/open?id=1tJc8nsQfpCTDpAQfjnM6V8WblmvYrNQ5&usp=drive_fs",
-          targetCite: "«Слово, т. 7. ...»",
+          zhBracketCite: "《文集・卷七　专题・同名篇目（三）》",
+          zhSubtitleCite: "——《文集・卷七　专题・同名篇目（三）》",
+          zhTitle: "同名篇目（三）",
+          enTitle: "Same Title Essay (3)",
+          targetTitle: "Нарис (3)",
+          docUrl: "https://drive.google.com/open?id=1MockDriveFileIdVol7Example00001&usp=drive_fs",
+          targetCite: "«Збірка, т. 7. ...»",
         },
       ],
-      "卷七　关于追求真理・怎样追求真理（三）",
+      "卷七　专题・同名篇目（三）",
     );
-    expect(matched?.docUrl).toContain("1tJc8nsQfpCTDpAQfjnM6V8WblmvYrNQ5");
+    expect(matched?.docUrl).toContain("1MockDriveFileIdVol7Example00001");
   });
 
   it("parses shifted Indonesian hymn sheet (B/C/D) both via per-lang config and auto-header detection", () => {
@@ -763,31 +749,30 @@ describe("Custom SourceScriptColumnConfig remapped columns", () => {
     expect(cfg.colsByLang["印尼语"].hymnTargetCol).toBe("D");
 
     const idHymnGrid = toRichGrid([
-      ["", "20261103通知外文排查", "", ""],
+      ["", "专题备注", "", ""],
       ["", "中文", "英文", "印尼语"],
       ["", "神话诗歌标题：", "", ""],
-      ["", "《神希望能追求真理剩存下来》", "God Wishes Man Will Pursue the Truth and Survive", "Tuhan Berharap Manusia Akan Mengejar Kebenaran dan Bertahan Hidup"],
+      ["", "《山谷微风》", "Valley Breeze", "Angin Lembah"],
       ["", "教会诗歌：", "", ""],
-      ["", "《神的话语都是真理》", "All God's Words Are the Truth", "Semua Firman Tuhan Adalah Kebenaran"],
+      ["", "《晨光之歌》", "Song of Morning Light", "Lagu Cahaya Pagi"],
       ["", "I", "1", ""],
-      ["", "神来在人间与人同生活，发表了许多真理，", "God has come to earth to live with man, expressing many truths.", "Tuhan telah datang ke bumi untuk hidup bersama manusia, mengungkapkan banyak kebenaran."],
+      ["", "清晨阳光洒在青翠的山坡，", "Morning sunlight falls on green hills,", "Sinar matahari pagi jatuh di bukit hijau,"],
     ]);
-    // Works even with default A/B/C config thanks to auto-header shift detection
     const hymns = parseHymnSheet(idHymnGrid);
     expect(hymns).toHaveLength(2);
-    expect(hymns[1].zhTitle).toBe("神的话语都是真理");
-    expect(hymns[1].targetTitle).toBe("Semua Firman Tuhan Adalah Kebenaran");
+    expect(hymns[1].zhTitle).toBe("晨光之歌");
+    expect(hymns[1].targetTitle).toBe("Lagu Cahaya Pagi");
     expect(hymns[1].lines).toHaveLength(1);
   });
 
-  it("allows blank/missing columns in 六本书新摘自 and derives zhTitle from citation columns (Indonesian layout)", () => {
+  it("allows blank/missing columns in catalog and derives zhTitle from citation columns (Indonesian layout)", () => {
     const cfg = parseCloudConfigSheets(
       new Map<string, RichSheetGrid>([
         [
           CONFIG_TEMPLATE_SHEET_NAMES.cols,
           toRichGrid([
             ["语系", "表格名称", "表头行", "列1", "列2", "列3", "列4", "列5", "列6", "列7", "列8", "列9"],
-            ["印尼语(说明)", "六本书新摘自", "表头行", "中文括号摘自", "中文字幕带摘自", "中文篇目", "英文篇目", "外文篇目", "神话单篇链接", "外文单行摘自", "外文括号摘自", "外文字幕带摘自"],
+            ["印尼语(说明)", "六本书新摘自", "表头行", "中文括号摘自", "中文字幕带摘自", "中文篇目", "英文篇目", "外文篇目", "单篇链接", "外文单行摘自", "外文括号摘自", "外文字幕带摘自"],
             ["印尼语", "六本书新摘自", "1", "B", "C", "", "D", "E", "F", "G", "H", "I"],
           ]),
         ],
@@ -798,161 +783,144 @@ describe("Custom SourceScriptColumnConfig remapped columns", () => {
     expect(cfg.colsByLang["印尼语"].catalogTargetSubtitleBandCiteCol).toBe("I");
 
     const idCatalogGrid = toRichGrid([
-      ["", "中文括号版摘自", "中文单独一行的摘自", "英语新标题", "印尼标题", "神话单篇稿链接", "单独一行+书名的摘自", "括号版+书名的摘自", "字幕带用的摘自"],
+      ["", "中文括号版摘自", "中文单独一行的摘自", "英语新标题", "印尼标题", "单篇稿链接", "单独一行+书名的摘自", "括号版+书名的摘自", "字幕带用的摘自"],
       [
         "",
-        "《话・卷一　神的显现与作工・道成肉身的神的职分与人的本分的区别》",
-        "——《话・卷一　神的显现与作工・道成肉身的神的职分与人的本分的区别》",
-        "The Difference Between the Ministry of God Incarnate and the Duty of Man",
-        "Perbedaan antara Pelayanan Tuhan yang Berinkarnasi dan Tugas Manusia",
-        { text: "https://docs.google.com/document/d/id_doc_362", url: "https://docs.google.com/document/d/id_doc_362" },
-        "—Firman, Jilid 1. Penampakan dan Pekerjaan Tuhan",
-        "(Firman, Jilid 1. Penampakan dan Pekerjaan Tuhan)",
-        "Dikutip dari Firman, Jilid 1. Penampakan dan Pekerjaan Tuhan",
+        "《文集・卷一　总论・论工作与责任的区别》",
+        "——《文集・卷一　总论・论工作与责任的区别》",
+        "The Difference Between Work and Responsibility",
+        "Perbedaan antara Pekerjaan dan Tanggung Jawab",
+        { text: "https://docs.google.com/document/d/id_doc_mock", url: "https://docs.google.com/document/d/id_doc_mock" },
+        "—Koleksi, Jilid 1. Ikhtisar",
+        "(Koleksi, Jilid 1. Ikhtisar)",
+        "Dikutip dari Koleksi, Jilid 1. Ikhtisar",
       ],
     ]);
     const entries = parseArticleCatalogSheet(idCatalogGrid, cfg.colsByLang["印尼语"]);
     expect(entries).toHaveLength(1);
-    expect(entries[0].zhTitle).toBe("道成肉身的神的职分与人的本分的区别");
-    expect(entries[0].docUrl).toBe("https://docs.google.com/document/d/id_doc_362");
-    expect(entries[0].targetCite).toContain("—Firman");
-    expect(entries[0].targetBracketCite).toContain("(Firman");
-    expect(entries[0].targetSubtitleBandCite).toContain("Dikutip dari Firman");
+    expect(entries[0].zhTitle).toBe("论工作与责任的区别");
+    expect(entries[0].docUrl).toBe("https://docs.google.com/document/d/id_doc_mock");
+    expect(entries[0].targetCite).toContain("—Koleksi");
+    expect(entries[0].targetBracketCite).toContain("(Koleksi");
+    expect(entries[0].targetSubtitleBandCite).toContain("Dikutip dari Koleksi");
   });
 
-  it("does not split Ukrainian church hymn at unpunctuated lyric line like 每天吃喝神话 and aggregates multi-sublines accurately", () => {
+  it("does not split hymn at unpunctuated lyric line and aggregates multi-sublines accurately", () => {
     const ukHymnGrid = toRichGrid([
-      ["", "尼日利亚报道", "", ""],
+      ["", "专题示例", "", ""],
       ["", "教会诗歌：", "", ""],
-      ["", "《神的话语都是真理》", "All God's Words Are the Truth", "Усі Божі слова є істиною"],
+      ["", "《晨光之歌》", "Song of Morning Light", "Пісня ранкового світла"],
       ["", "I", "1", ""],
-      ["", "神来在人间与人同生活，发表了许多真理，", "God has come to earth to live with man, expressing many truths.", "Бог прийшов на землю жити з людиною, висловлюючи багато істин."],
-      ["", "从此我不再渺茫中寻觅，", "No longer do I search in uncertainty,", "Я більше не шукаю в невизначеності,"],
-      ["", "因有神话带领我，", "for I have God's words to guide me.", "бо мене спрямовують Божі слова."],
-      ["", "每天吃喝神话", "Each day, I eat and drink God's words", "Щодня я їм і п'ю Божі слова"],
-      ["", "活在神前，", "and live before God;", "та живу перед Богом;"],
-      ["", "有圣灵开启光照，", "the Holy Spirit enlightens and illuminates me.", "Святий Дух просвіщає й осяює мене."],
-      ["", "我明白真理越来越透亮，", "I understand the truth ever more clearly,", "Я розумію істину дедалі ясніше,"],
-      ["", "生命天天有长进。", "and my life progresses every day.", "і моє життя щодня прогресує."],
-      ["", "神话道尽人类败坏实情，", "God's words lay bare the facts of man's corruption,", "Божі слова оголюють факти людської розбещеності,"],
-      ["", "使人都心服口服，", "leaving everyone utterly convinced.", "залишаючи всіх цілковито переконаними."],
-      ["", "经历神话审判受尽试炼，", "Through the judgment of God's words and suffering many trials,", "Через суд Божих слів і переживання багатьох випробувань"],
-      ["", "败坏性情得洁净，败坏性情得洁净。", "my corrupt disposition is cleansed, my corrupt disposition is cleansed.", "мій розбещений характер очищується, мій розбещений характер очищується."],
-      ["", "享受神的话语丰丰富富，我得着的实在多，", "Enjoying the richness of God's words, I have truly gained much.", "Насолоджуючись багатством Божих слів, я справді багато здобув."],
-      ["", "看见神的性情公义圣洁，我敬畏神仰慕神。", "Seeing the righteousness and holiness of God's disposition, I fear God and adore Him.", "Бачачи праведність і святість Божого характеру, я боюся Бога й обожнюю Його."],
-      ["", "神的话语都是真理。", "All God's words are the truth.", "Усі Божі слова є істиною."],
-      ["", "神的话语都是真理。", "All God's words are the truth.", "Усі Божі слова є істиною."],
+      ["", "清晨阳光洒在青翠山坡，", "Morning sunlight falls on green hills,", "Ранкове сонце падає на зелені пагорби,"],
+      ["", "微风吹过清澈溪水，", "a gentle breeze blows over the stream,", "легкий вітер дме над струмком,"],
+      ["", "树叶轻轻摇曳。", "and leaves sway softly.", "і листя тихо гойдається."],
+      ["", "每天早起漫步林间", "Each morning I walk in the woods", "Щоранку я гуляю в лісі"],
+      ["", "听见清脆鸟鸣，", "listening to clear birdsong,", "слухаючи дзвінкий спів птахів,"],
+      ["", "心里充满喜悦。", "my heart is full of joy.", "і серце сповнюється радістю."],
+      ["", "晨光之歌真美妙。", "The morning song is lovely.", "Пісня ранку чудова."],
+      ["", "晨光之歌真美妙。", "The morning song is lovely.", "Пісня ранку чудова."],
     ]);
 
     const hymns = parseHymnSheet(ukHymnGrid);
     expect(hymns).toHaveLength(1);
-    expect(hymns[0].lines).toHaveLength(16);
+    expect(hymns[0].lines).toHaveLength(8);
 
     const scriptRows = [
-      makeScriptRow({ rowIndex: 0, chinese: "“神来在人间与人同生活，发表了许多真理，", english: "\"God has come to earth to live with man, expressing many truths." }),
-      makeScriptRow({ rowIndex: 1, chinese: "从此我不再渺茫中寻觅，因有神话带领我，", english: "No longer do I search in uncertainty, for I have God's words to guide me." }),
-      makeScriptRow({ rowIndex: 2, chinese: "每天吃喝神话活在神前，有圣灵开启光照，", english: "Each day, I eat and drink God's words and live before God; the Holy Spirit enlightens and illuminates me." }),
-      makeScriptRow({ rowIndex: 3, chinese: "我明白真理越来越透亮，生命天天有长进。", english: "I understand the truth ever more clearly, and my life progresses every day." }),
-      makeScriptRow({ rowIndex: 4, chinese: "神话道尽人类败坏实情，使人都心服口服，", english: "God's words lay bare the facts of man's corruption, leaving everyone utterly convinced." }),
-      makeScriptRow({ rowIndex: 5, chinese: "经历神话审判受尽试炼，", english: "Through the judgment of God's words and suffering many trials," }),
-      makeScriptRow({ rowIndex: 6, chinese: "败坏性情得洁净，败坏性情得洁净。", english: "my corrupt disposition is cleansed." }),
-      makeScriptRow({ rowIndex: 7, chinese: "享受神的话语丰丰富富，我得着的实在多，", english: "Enjoying the richness of God's words, I have truly gained much." }),
-      makeScriptRow({ rowIndex: 8, chinese: "看见神的性情公义圣洁，我敬畏神仰慕神。", english: "Seeing the righteousness and holiness of God's disposition, I fear God and adore Him." }),
-      makeScriptRow({ rowIndex: 9, chinese: "神的话语是真理。", english: "God's words are the truth." }),
-      makeScriptRow({ rowIndex: 10, chinese: "神的话语是真理。”", english: "God's words are the truth.\"" }),
+      makeScriptRow({ rowIndex: 0, chinese: "“清晨阳光洒在青翠山坡，", english: '"Morning sunlight falls on green hills,' }),
+      makeScriptRow({ rowIndex: 1, chinese: "微风吹过清澈溪水，树叶轻轻摇曳。", english: "a gentle breeze blows over the stream, and leaves sway softly." }),
+      makeScriptRow({ rowIndex: 2, chinese: "每天早起漫步林间听见清脆鸟鸣，心里充满喜悦。", english: "Each morning I walk in the woods listening to clear birdsong, my heart is full of joy." }),
+      makeScriptRow({ rowIndex: 3, chinese: "晨光之歌很美妙。", english: "The morning song is lovely." }),
+      makeScriptRow({ rowIndex: 4, chinese: "晨光之歌很美妙。”", english: 'The morning song is lovely."' }),
     ];
 
     const agg = aggregateHymnSublinesForBlock(hymns[0].lines, scriptRows);
     expect(agg).not.toBeNull();
-    expect(agg![0]).toBe("Бог прийшов на землю жити з людиною, висловлюючи багато істин.");
-    expect(agg![1]).toBe("Я більше не шукаю в невизначеності, бо мене спрямовують Божі слова.");
-    expect(agg![2]).toBe("Щодня я їм і п'ю Божі слова та живу перед Богом; Святий Дух просвіщає й осяює мене.");
-    expect(agg![3]).toBe("Я розумію істину дедалі ясніше, і моє життя щодня прогресує.");
-    expect(agg![4]).toBe("Божі слова оголюють факти людської розбещеності, залишаючи всіх цілковито переконаними.");
-    expect(agg![7]).toBe("Насолоджуючись багатством Божих слів, я справді багато здобув.");
-    expect(agg![9]).toBe("Усі Божі слова є істиною.");
-    expect(agg![10]).toBe("Усі Божі слова є істиною.");
+    expect(agg![0]).toBe("Ранкове сонце падає на зелені пагорби,");
+    expect(agg![1]).toBe("легкий вітер дме над струмком, і листя тихо гойдається.");
+    expect(agg![2]).toBe("Щоранку я гуляю в лісі слухаючи дзвінкий спів птахів, і серце сповнюється радістю.");
+    expect(agg![3]).toBe("Пісня ранку чудова.");
+    expect(agg![4]).toBe("Пісня ранку чудова.");
   });
 
-  it("matches single-row Luke 17:24-25 and merges multi-row Romans 7:15 + 7:16 Bible verses with leading ellipsis", () => {
+  it("matches single-row verse and merges multi-row consecutive verses with leading ellipsis", () => {
     const ukBible = [
       {
         chapterRef: "Luke\n17:24–25",
-        chinese: "“因为人子在他降临的日子，好像闪电从天这边一闪直照到天那边。只是他必须先受许多苦，又被这世代弃绝。”（路17:24-25）",
-        english: '"For as the lightning, that lightens out of the one part under heaven, shines to the other part under heaven; so shall also the Son of man be in His day. But first must He suffer many things, and be rejected of this generation" (Luke 17:24–25).',
-        targetText: "«Бо як блискавка, блиснувши, світить із одного краю під небом до другого краю під небом, так буде Свого дня й Син Людський. А перше належить багато страждати Йому, і відцурається рід цей від Нього...» (Луки 17:24–25).",
+        chinese: "“第一句示例经文，照亮四方。第二句示例经文，继续前行。”（路17:24-25）",
+        english: '"First synthetic verse shining everywhere. Second synthetic verse moving ahead." (Luke 17:24–25).',
+        targetText: "«Перший тестовий рядок світить усюди. Другий тестовий рядок іде вперед...» (Луки 17:24–25).",
       },
       {
         chapterRef: "Romans\n7:15",
-        chinese: "我所愿意的，我并不做；我所恨恶的，我倒去做。",
-        english: "For what I would, that do I not; but what I hate, that do I.",
-        targetText: "«Я бо чиню не те, що хочу, але що ненавиджу, те я роблю» (До Римлян 7:15).",
+        chinese: "我所计划的，还未完成；我所忽略的，反而先做了。",
+        english: "For what I planned, I have not done; what I overlooked, I did instead.",
+        targetText: "«Бо те, що я планував, я не зробив, а те, що пропустив, зробив» (До Римлян 7:15).",
       },
       {
         chapterRef: "Romans\n7:16",
-        chinese: "若我所做的，是我所不愿意的，我就应承律法是善的。",
-        english: "If then I do that which I would not, I consent to the law that it is good.",
-        targetText: "«А коли роблю те, чого я не хочу, то згоджуюсь із Законом, що він добрий» (До Римлян 7:16).",
+        chinese: "若我所做的并非本意，我就承认规章是好的。",
+        english: "If then I do what I did not intend, I agree that the rule is good.",
+        targetText: "«А коли роблю не за наміром, то визнаю, що правило добре» (До Римлян 7:16).",
       },
     ];
 
     const lukeHit = findBibleVerse(ukBible, "(Luke 17:24–25).", [
-      makeScriptRow({ rowIndex: 0, chinese: "“因为人子在他降临的日子，", english: '"For as the lightning,' }),
-      makeScriptRow({ rowIndex: 1, chinese: "好像闪电从天这边一闪直照到天那边。", english: "that lightens out of the one part under heaven, shines to the other part under heaven; so shall also the Son of man be in His day." }),
-      makeScriptRow({ rowIndex: 2, chinese: "只是他必须先受许多苦，又被这世代弃绝”", english: 'But first must He suffer many things, and be rejected of this generation"' }),
+      makeScriptRow({ rowIndex: 0, chinese: "“第一句示例经文，", english: '"First synthetic verse' }),
+      makeScriptRow({ rowIndex: 1, chinese: "照亮四方。", english: "shining everywhere." }),
+      makeScriptRow({ rowIndex: 2, chinese: "第二句示例经文，继续前行”", english: 'Second synthetic verse moving ahead"' }),
     ]);
     expect(lukeHit).not.toBeNull();
     expect(lukeHit!.targetCitationRef).toBe("(Луки 17:24–25)");
-    expect(lukeHit!.text).toContain("Бо як блискавка");
+    expect(lukeHit!.text).toContain("Перший тестовий рядок");
 
     const romHit = findBibleVerse(ukBible, "新约", [
-      makeScriptRow({ rowIndex: 0, chinese: "“我所愿意的，我并不做，", english: '"... what I would, that do I not;' }),
-      makeScriptRow({ rowIndex: 1, chinese: "我所恨恶的，我倒去做，", english: "but what I hate, that do I." }),
-      makeScriptRow({ rowIndex: 2, chinese: "若我所做的，是我所不愿意的，我就应承律法是善的。”", english: 'If then I do that which I would not, I consent to the law that it is good."' }),
+      makeScriptRow({ rowIndex: 0, chinese: "“我所计划的，还未完成，", english: '"... what I planned, I have not done;' }),
+      makeScriptRow({ rowIndex: 1, chinese: "我所忽略的，反而先做了，", english: "what I overlooked, I did instead." }),
+      makeScriptRow({ rowIndex: 2, chinese: "若我所做的并非本意，我就承认规章是好的。”", english: 'If then I do what I did not intend, I agree that the rule is good."' }),
     ]);
     expect(romHit).not.toBeNull();
     expect(romHit!.truncatedStart).toBe(true);
     expect(romHit!.targetCitationRef).toBe("(До Римлян 7:15–16)");
-    expect(romHit!.text).toContain("Я бо чиню не те");
-    expect(romHit!.text).toContain("А коли роблю те");
+    expect(romHit!.text).toContain("Бо те, що я планував");
+    expect(romHit!.text).toContain("А коли роблю не за наміром");
   });
 
   it("slices single-row half-sentence excerpts at clause boundary (non-AI) and marks isPartial for AI semantic alignment", () => {
     const paragraphs = [
       {
-        chinese: "在人的败坏性情里有个共性的问题，这是每个人里面都存在的问题，而且是一个很严重的问题，这个共性的问题就是人性最软弱、最致命的地方。",
-        english: "There is a common problem in the corrupt disposition of people, a problem which exists within everyone, and a very severe one at that. This common problem is the weakest, most fatal part of their humanity.",
-        target: "Розбещеному характеру людей притаманна спільна проблема — проблема, яка є всередині кожного, і при цьому дуже тяжка проблема. Ця спільна проблема є найслабшою, найфатальнішою частиною їхньої людськості.",
+        chinese: "在日常工作里有个常见的问题，这是很多人都会遇到的问题，而且是一个很关键的问题，这个常见的问题就是时间规划不够清晰。",
+        english: "There is a common issue in daily work, an issue which many people encounter, and a very key one at that. This common issue is that time planning is not clear enough.",
+        target: "У щоденній роботі є спільна проблема — проблема, з якою стикаються багато людей, і дуже важлива проблема. Ця спільна проблема полягає в нечіткому плануванні часу.",
       },
     ];
     const row452 = [
       makeScriptRow({
         rowIndex: 0,
         line: "452",
-        chinese: "“在人的败坏性情里有个共性的问题，",
-        english: '"There is a common problem in the corrupt disposition of people,',
+        chinese: "“在日常工作里有个常见的问题，",
+        english: '"There is a common issue in daily work,',
       }),
     ];
     const loc = locateParagraphInManuscript(paragraphs, row452);
     expect(loc).not.toBeNull();
     expect(loc!.isPartial).toBe(true);
-    expect(loc!.matchedText).not.toContain("тяжка проблема.");
+    expect(loc!.matchedText).not.toContain("важлива проблема.");
     expect(loc!.fullParagraphTarget).toContain("Ця спільна проблема");
   });
 
   it("batches multiple split tasks via token-index spans with 100% verbatim fidelity", async () => {
     const rule = resolvePunctuationRule("乌克兰语");
     const targetText =
-      "Розбещеному характеру людей притаманна спільна проблема — проблема, яка є всередині кожного.";
+      "У щоденній роботі є спільна проблема — проблема, з якою стикаються багато людей.";
     const { tokens, joinSep } = tokenizeForIndexing(targetText);
     const sliced = sliceTokensBySpans(
       tokens,
       joinSep,
-      [{ start: 0, end: 4 }],
-      [makeScriptRow({ rowIndex: 0, line: "452", chinese: "“在人的败坏性情里有个共性的问题，" })],
+      [{ start: 0, end: 5 }],
+      [makeScriptRow({ rowIndex: 0, line: "452", chinese: "“在日常工作里有个常见的问题，" })],
       rule,
     );
-    expect(sliced).toEqual(["Розбещеному характеру людей притаманна спільна"]);
+    expect(sliced).toEqual(["У щоденній роботі є спільна проблема"]);
 
     let apiCalls = 0;
     const mockGemini = {
@@ -974,7 +942,7 @@ describe("Custom SourceScriptColumnConfig remapped columns", () => {
           id: "blk_1",
           fallbackText: targetText,
           aiSourceText: targetText,
-          sourceRows: [makeScriptRow({ rowIndex: 0, line: "452", chinese: "“在人的败坏性情里有个共性的问题，" })],
+          sourceRows: [makeScriptRow({ rowIndex: 0, line: "452", chinese: "“在日常工作里有个常见的问题，" })],
         },
         {
           id: "blk_2",
@@ -992,7 +960,7 @@ describe("Custom SourceScriptColumnConfig remapped columns", () => {
 
     expect(apiCalls).toBe(1);
     expect(batchRes.get("blk_1")?.usedAi).toBe(true);
-    expect(batchRes.get("blk_1")?.lines).toEqual(["Розбещеному характеру людей притаманна спільна проблема"]);
+    expect(batchRes.get("blk_1")?.lines).toEqual(["У щоденній роботі є спільна проблема"]);
     expect(batchRes.get("blk_2")?.lines[1]).toContain(rule.ellipsis);
   });
 

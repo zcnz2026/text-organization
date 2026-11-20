@@ -32,4 +32,11 @@ export const icons = {
   sparkle: wrap(
     `<path d="m10 3 1.4 4.1L15.5 8.5l-4.1 1.4L10 14l-1.4-4.1L4.5 8.5l4.1-1.4L10 3Z"/>`,
   ),
+  settings: wrap(
+    `<circle cx="10" cy="10" r="2.6"/><path d="M10 2.8v1.9M10 15.3v1.9M3.8 6.4l1.6 1M14.6 12.6l1.6 1M3.8 13.6l1.6-1M14.6 7.4l1.6-1"/>`,
+  ),
+  subtitles: wrap(
+    `<rect x="2.5" y="4" width="15" height="12" rx="1.8"/><path d="M5.5 10.5h4.2M11.5 10.5h3M5.5 13.2h6.5M13.5 13.2h1"/>`,
+  ),
+  chevronRight: wrap(`<path d="m7.5 5.5 4.5 4.5-4.5 4.5"/>`),
 };

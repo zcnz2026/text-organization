@@ -88,6 +88,16 @@ export const hostBridge = {
     return callHost<string[]>("get_plain_gemini_keys");
   },
 
+  async fetchPublicSheetXlsxBytes(spreadsheetId: string): Promise<Uint8Array> {
+    const b64 = await callHost<string>("fetch_public_sheet_xlsx_base64", { spreadsheetId });
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) {
+      out[i] = bin.charCodeAt(i);
+    }
+    return out;
+  },
+
   appendDiagLog(line: string): Promise<{ ok: boolean }> {
     return callHost<{ ok: boolean }>("append_diag_log", { line });
   },

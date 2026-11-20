@@ -62,6 +62,26 @@ async function dispatchApi(cmd, body) {
   if (cmd === "get_plain_gemini_keys") {
     return readVault().geminiKeys || [];
   }
+  if (cmd === "fetch_public_sheet_xlsx_base64") {
+    const sid = String(body.spreadsheetId || "").trim();
+    if (!/^[A-Za-z0-9_-]{15,80}$/.test(sid)) {
+      throw new Error("无效的 Google 表格 ID");
+    }
+    const exportUrl = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sid)}/export?format=xlsx`;
+    const resp = await fetch(exportUrl, { redirect: "follow" });
+    if (!resp.ok) {
+      throw new Error(`无法匿名导出该表格 (HTTP ${resp.status})，请在右上角「设置」登录 Google OAuth 授权账号`);
+    }
+    const ct = resp.headers.get("content-type") || "";
+    if (ct.includes("text/html")) {
+      throw new Error("该 Google 表格未开启公开链接查看权限，请在右上角「设置」登录已授权的 Google 账号");
+    }
+    const ab = await resp.arrayBuffer();
+    if (ab.byteLength > 24 * 1024 * 1024) {
+      throw new Error("Google 表格导出体积超过 24MB 上限");
+    }
+    return Buffer.from(ab).toString("base64");
+  }
   if (cmd === "append_diag_log") {
     const logDir = path.resolve(process.cwd(), "logs");
     fs.mkdirSync(logDir, { recursive: true });

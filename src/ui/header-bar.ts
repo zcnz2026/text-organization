@@ -1,30 +1,34 @@
 import { APP_VERSION } from "../platform/version";
 import { icons } from "./icons";
-import { notifyStateChanged, store } from "./state";
+import { type MainWorkbenchTab, notifyStateChanged, store } from "./state";
 import { openUpdateDialog } from "./update-dialog";
 
 export function renderHeaderBar(
   container: HTMLElement,
   actions: {
-    openOAuthDialog: () => void;
-    openGeminiDialog: () => void;
-    openCatalogConfigDialog: () => void;
-    openRulesDialog: () => void;
+    openSettingsDialog: () => void;
   },
 ): void {
   const oauthConnected = store.auth.authorized;
-  const oauthLabel = oauthConnected
-    ? `已授权 ${store.auth.email || "Google 账号"}`
+  const hasKeys = store.geminiSummary.count > 0;
+  const activeTab = store.activeMainTab;
+
+  const oauthDotClass = oauthConnected
+    ? "status-dot-ok"
     : store.auth.hasClientJson
-      ? "已载入凭据 · 点击登录"
-      : "Google OAuth 授权";
+      ? "status-dot-warn"
+      : "status-dot-muted";
+  const keyDotClass = hasKeys ? "status-dot-ok" : "status-dot-muted";
 
-  const geminiLabel =
-    store.geminiSummary.count > 0
-      ? `API 密钥池 (${store.geminiSummary.count})`
-      : "API 密钥池";
-
-  const theme = store.settings.themeMode;
+  const settingsTooltip = [
+    oauthConnected
+      ? `Google 已授权 (${store.auth.email || "已连接"})`
+      : "Google OAuth 未授权",
+    hasKeys
+      ? `API 密钥池 (${store.geminiSummary.count} 个)`
+      : "API 密钥池未配置",
+    "点击打开全局设置与规则库",
+  ].join(" · ");
 
   container.innerHTML = `
     <header class="topbar">
@@ -38,28 +42,55 @@ export function renderHeaderBar(
           title="点击检查 GitHub 最新版本"
         >${store.availableUpdate?.hasUpdate ? `发现新版本 v${esc(store.availableUpdate.latestVersion)}` : `v${esc(APP_VERSION)} · 检查更新`}</button>
       </div>
-      <div class="topbar-actions">
-        <button type="button" id="btn-open-oauth" class="btn ${oauthConnected ? "btn-connected" : ""}">
-          ${icons.shieldCheck}
-          <span>${esc(oauthLabel)}</span>
-        </button>
-        <button type="button" id="btn-open-gemini" class="btn">
-          ${icons.key}
-          <span>${esc(geminiLabel)}</span>
-        </button>
-        <button type="button" id="btn-open-catalog-cfg" class="btn">
+
+      <div
+        class="tablist-scroller main-tablist"
+        role="tablist"
+        focusgroup="tablist nomemory"
+        aria-label="主功能工作台"
+      >
+        <button
+          type="button"
+          role="tab"
+          id="tab-main-extract"
+          class="tab-btn main-tab-btn"
+          data-main-tab="extract"
+          aria-selected="${activeTab === "extract"}"
+          tabindex="${activeTab === "extract" ? "0" : "-1"}"
+          ${activeTab === "extract" ? "focusgroupstart" : ""}
+        >
           ${icons.tableGrid}
-          <span>资源与列配置清单</span>
+          <span>剧本摘录整理</span>
         </button>
-        <button type="button" id="btn-open-rules" class="btn">
-          ${icons.quotes}
-          <span>语种标点规则库</span>
+        <button
+          type="button"
+          role="tab"
+          id="tab-main-linebreak"
+          class="tab-btn main-tab-btn"
+          data-main-tab="linebreak"
+          aria-selected="${activeTab === "linebreak"}"
+          tabindex="${activeTab === "linebreak" ? "0" : "-1"}"
+          ${activeTab === "linebreak" ? "focusgroupstart" : ""}
+        >
+          ${icons.subtitles}
+          <span>字幕断行</span>
         </button>
-        <div class="segmented-group" role="group" aria-label="外观模式">
-          <button type="button" class="seg-option" data-theme-val="system" aria-pressed="${theme === "system"}">自动</button>
-          <button type="button" class="seg-option" data-theme-val="light" aria-pressed="${theme === "light"}">浅色</button>
-          <button type="button" class="seg-option" data-theme-val="dark" aria-pressed="${theme === "dark"}">深色</button>
-        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <button
+          type="button"
+          id="btn-open-settings"
+          class="btn btn-settings-trigger"
+          title="${esc(settingsTooltip)}"
+        >
+          ${icons.settings}
+          <span>设置</span>
+          <span class="settings-dots" aria-hidden="true">
+            <span class="status-dot ${oauthDotClass}"></span>
+            <span class="status-dot ${keyDotClass}"></span>
+          </span>
+        </button>
       </div>
     </header>
   `;
@@ -67,24 +98,47 @@ export function renderHeaderBar(
   container
     .querySelector("#btn-check-update")
     ?.addEventListener("click", () => openUpdateDialog(store.availableUpdate));
-  container
-    .querySelector("#btn-open-oauth")
-    ?.addEventListener("click", actions.openOAuthDialog);
-  container
-    .querySelector("#btn-open-gemini")
-    ?.addEventListener("click", actions.openGeminiDialog);
-  container
-    .querySelector("#btn-open-catalog-cfg")
-    ?.addEventListener("click", actions.openCatalogConfigDialog);
-  container
-    .querySelector("#btn-open-rules")
-    ?.addEventListener("click", actions.openRulesDialog);
 
-  container.querySelectorAll<HTMLButtonElement>("[data-theme-val]").forEach((btn) => {
+  container
+    .querySelector("#btn-open-settings")
+    ?.addEventListener("click", actions.openSettingsDialog);
+
+  const tabBtns = Array.from(
+    container.querySelectorAll<HTMLButtonElement>("[data-main-tab]"),
+  );
+
+  const activateTab = (nextTab: MainWorkbenchTab, focusAfter = false) => {
+    if (store.activeMainTab === nextTab) return;
+    store.activeMainTab = nextTab;
+    store.notice = null;
+    notifyStateChanged();
+    if (focusAfter) {
+      const targetBtn = document.querySelector<HTMLButtonElement>(
+        `[data-main-tab="${nextTab}"]`,
+      );
+      targetBtn?.focus();
+      targetBtn?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  };
+
+  tabBtns.forEach((btn, idx) => {
     btn.addEventListener("click", () => {
-      const val = btn.dataset.themeVal as "system" | "light" | "dark";
-      store.settings.themeMode = val;
-      notifyStateChanged();
+      const tab = btn.dataset.mainTab as MainWorkbenchTab;
+      activateTab(tab, false);
+      btn.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+
+    btn.addEventListener("keydown", (e) => {
+      let nextIdx = -1;
+      if (e.key === "ArrowRight") nextIdx = (idx + 1) % tabBtns.length;
+      else if (e.key === "ArrowLeft") nextIdx = (idx - 1 + tabBtns.length) % tabBtns.length;
+      else if (e.key === "Home") nextIdx = 0;
+      else if (e.key === "End") nextIdx = tabBtns.length - 1;
+      if (nextIdx >= 0) {
+        e.preventDefault();
+        const nextTab = tabBtns[nextIdx].dataset.mainTab as MainWorkbenchTab;
+        activateTab(nextTab, true);
+      }
     });
   });
 }

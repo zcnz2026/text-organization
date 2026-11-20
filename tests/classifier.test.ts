@@ -1,26 +1,19 @@
-import fs from "node:fs";
-import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { classifyScriptTasks } from "../src/engine/classifier";
-import { parseCsvToGrid, parseGridToScriptDocument } from "../src/engine/csv-sheet";
-
-const SAMPLE_CSV = path.resolve(
-  __dirname,
-  "../../剧本/对应句子/演示稿 - 39期教会生活.csv",
-);
+import { parseGridToScriptDocument } from "../src/engine/csv-sheet";
 
 describe("classifier on synthetic multi-category script", () => {
   it("classifies prefixes, scripture, idioms, standalone titles, and Note XX rows", () => {
     const grid = [
       ["Line", "In Time", "Out Time", "Character", "Chinese", "English底", "Target Language", "Note", "备注", "送翻备注", "筛选列", "需要摘"],
-      ["3", "", "", "Title", "教会经历", "", "", "Church Name\nXX", "", "提前贴上教会名", "", ""],
-      ["53", "", "", "Host", "《神的话语都是真理》。", "\"All God's Words Are the Truth.\"", "No need to translate!", "All God's Words Are the Truth\nXX", "", "提前贴上", "含诗歌标题", "需要摘"],
-      ["255", "", "", "Speaker", "全能神说：", "Almighty God says:", "No need to translate!", "", "", "", "卷一　神的显现与作工・第一篇", "需要摘"],
-      ["256", "", "", "Speaker", "“神的话语是真理。”", "\"God's words are the truth.\"", "No need to translate!", "", "", "", "卷一　神的显现与作工・第一篇", "需要摘"],
-      ["257", "", "", "Subtitle", "《话・卷一　神的显现与作工・第一篇》", "from The Word, Vol. 1", "No need to translate!", "", "", "", "卷一　神的显现与作工・第一篇", "需要摘"],
-      ["Caption", "", "", "", "人不为己，天诛地灭", "Every man for himself", "No need to translate!", "", "", "", "撒但毒素", ""],
-      ["Voice", "", "", "", "“起初神创造天地。”", "\"In the beginning...\"", "No need to translate!", "", "", "", "新约", ""],
-      ["Subtitle", "", "", "", "（创世记1:1）", "(Genesis 1:1).", "No need to translate!", "", "", "", "新约", ""],
+      ["3", "", "", "Title", "专题纪实标题", "", "", "Branch Name\nXX", "", "提前贴上名称", "", ""],
+      ["53", "", "", "Host", "《晨光之歌》。", '"Song of Morning Light."', "No need to translate!", "Song of Morning Light\nXX", "", "提前贴上", "含诗歌标题", "需要摘"],
+      ["255", "", "", "Speaker", "全能神说：", "Almighty God says:", "No need to translate!", "", "", "", "卷一・第一篇", "需要摘"],
+      ["256", "", "", "Speaker", "“春风拂过山川大地。”", '"Spring breeze sweeps across the land."', "No need to translate!", "", "", "", "卷一・第一篇", "需要摘"],
+      ["257", "", "", "Subtitle", "《卷一・第一篇》", "from Vol. 1, Article 1", "No need to translate!", "", "", "", "卷一・第一篇", "需要摘"],
+      ["Caption", "", "", "", "千里之行，始于足下", "A journey of a thousand miles begins with a single step", "No need to translate!", "", "", "", "俗语", ""],
+      ["Voice", "", "", "", "“光照射在黑暗里。”", '"The light shines in the darkness."', "No need to translate!", "", "", "", "新约", ""],
+      ["Subtitle", "", "", "", "（约翰福音1:5）", "(John 1:5).", "No need to translate!", "", "", "", "新约", ""],
     ];
     const doc = parseGridToScriptDocument(grid, "Synthetic");
     const tasks = classifyScriptTasks(doc.rows);
@@ -33,31 +26,5 @@ describe("classifier on synthetic multi-category script", () => {
       "idiom",
       "bible_verses",
     ]);
-  });
-});
-
-describe.skipIf(!fs.existsSync(SAMPLE_CSV))("classifier on real 39期教会生活 script", () => {
-  it("parses header and classifies all 8 extraction categories including unflagged idioms & scripture", () => {
-    const raw = fs.readFileSync(SAMPLE_CSV, "utf-8");
-    const grid = parseCsvToGrid(raw);
-    const doc = parseGridToScriptDocument(grid, "39期教会生活");
-
-    expect(doc.headerRows.length).toBe(2);
-    expect(doc.rows.length).toBe(698);
-
-    const tasks = classifyScriptTasks(doc.rows);
-    const byKind = (kind: string) => tasks.filter((t) => t.kind === kind);
-
-    expect(byKind("god_words_prefix").length).toBe(3);
-    expect(byKind("god_words_body").length).toBe(8);
-    expect(byKind("hymn_lyrics").length).toBe(3);
-    expect(byKind("lords_prayer").length).toBe(1);
-    expect(byKind("idiom").length).toBe(4);
-    expect(byKind("bible_verses").length).toBe(2);
-    expect(byKind("standalone_title").length).toBe(4);
-    expect(byKind("combo_title").length).toBe(6);
-    expect(byKind("inline_note_xx").length).toBe(4);
-    expect(byKind("roster_match").length).toBe(5);
-    expect(byKind("citation_subtitle").length).toBe(11);
   });
 });

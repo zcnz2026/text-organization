@@ -59,7 +59,7 @@ export function renderTaskPanel(
 
         <div class="rail-form-row">
           <label class="rail-row-label" for="inp-hymn-kw">诗歌匹配</label>
-          <input id="inp-hymn-kw" type="text" class="text-input" placeholder="如：39期.葡萄牙 或 39期" value="${esc(store.hymnEpisodeKeyword)}" ${store.busy ? "disabled" : ""} />
+          <input id="inp-hymn-kw" type="text" class="text-input" placeholder="如：当期期数或专题关键词" value="${esc(store.hymnEpisodeKeyword)}" ${store.busy ? "disabled" : ""} />
         </div>
 
         <details class="compact-details">

@@ -119,7 +119,7 @@ export function locateParagraphInManuscript(
   const lastEnProbe = normMatchKey(lastRow.english).slice(-28);
 
   // Additional probes from 2nd row and middle row to disambiguate duplicate opening sentences
-  // (e.g. "为什么人必须追求真理？" appearing in an intro transition before the real passage)
+  // when the same opening question/phrase appears earlier as a brief intro transition
   const secondRow = sourceRows.length >= 2 ? sourceRows[1] : null;
   const midRow = sourceRows.length >= 4 ? sourceRows[Math.floor(sourceRows.length / 2)] : null;
   const secondZhProbe = secondRow ? normMatchKey(secondRow.chinese).slice(0, 14) : "";

@@ -13,7 +13,6 @@ import { hostBridge } from "../platform/bridge";
 import { diagLog } from "../platform/diag-log";
 import type { LanguageResourceLinks } from "../types/domain";
 import type { CloudWorkspaceConfig } from "../types/schema-config";
-import { createSyntheticDemoState } from "./demo-fixture";
 import { getLangCols, notifyStateChanged, store } from "./state";
 
 function createCloudClients() {
@@ -101,23 +100,11 @@ export function downloadConfigTemplateXlsx(): void {
   triggerXlsxDownload(bytes, "文字整理工具_标准云端配置表模板.xlsx");
 }
 
-export async function loadSampleDemo(): Promise<void> {
-  const { doc, runs } = await createSyntheticDemoState();
-  store.scriptDoc = doc;
-  store.isDemoData = true;
-  store.runsByLang = runs;
-  store.activePreviewLang = "乌克兰语";
-  store.rowFilter = "extractable";
-  store.notice = { type: "info", message: "已载入第 39 期报道合成演示样本，可切换筛选标签或直接点击单元格体验微调。" };
-  notifyStateChanged();
-}
-
 export async function importLocalCsvFile(file: File): Promise<void> {
   try {
     const grid = parseCsvToGrid(await file.text());
     const title = file.name.replace(/\.csv$/i, "");
     store.scriptDoc = parseGridToScriptDocument(grid, title, store.sourceColConfig);
-    store.isDemoData = false;
     store.runsByLang.clear();
     store.activePreviewLang = "";
     store.rowFilter = "extractable";
@@ -137,7 +124,6 @@ export async function loadCloudSourceAndMatrix(): Promise<void> {
     parsedDoc.sourceSpreadsheetId = srcParsed.id;
     parsedDoc.sourceSheetId = sheetId;
     store.scriptDoc = parsedDoc;
-    store.isDemoData = false;
     store.runsByLang.clear();
     store.progressPercent = 60;
     store.progressText = "正在解析多语种资源总配置表...";

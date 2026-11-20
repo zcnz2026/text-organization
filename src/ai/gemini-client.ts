@@ -21,8 +21,21 @@ export interface GeminiClientOptions {
   fetchFn?: typeof fetch;
 }
 
+export class GeminiPoolExhaustedError extends Error {
+  readonly status?: number;
+  readonly isKeyOrQuotaError: boolean;
+
+  constructor(message: string, status?: number, isKeyOrQuotaError = true) {
+    super(message);
+    this.name = "GeminiPoolExhaustedError";
+    this.status = status;
+    this.isKeyOrQuotaError = isKeyOrQuotaError;
+  }
+}
+
 export class GeminiPoolClient {
   private keys: string[];
+  private deadKeys = new Set<string>();
   private model: GeminiModelId;
   private rotation: KeyRotationStrategy;
   private cursor = 0;
@@ -43,26 +56,52 @@ export class GeminiPoolClient {
 
   async generateStructuredJson<T>(input: GeminiCallInput): Promise<T> {
     if (this.keys.length === 0) {
-      throw new Error("未配置 Gemini API Key");
+      throw new GeminiPoolExhaustedError("未配置 Gemini API Key，请在右上角「设置 → API 密钥池」中添加密钥", 401, true);
     }
+
+    const activeKeys = this.keys.filter((k) => !this.deadKeys.has(k));
+    const pool = activeKeys.length > 0 ? activeKeys : this.keys;
 
     const start =
       this.rotation === "round_robin"
-        ? this.cursor++ % this.keys.length
+        ? this.cursor++ % pool.length
         : 0;
 
     let lastErr: unknown = null;
-    for (let attempt = 0; attempt < this.keys.length; attempt += 1) {
-      const key = this.keys[(start + attempt) % this.keys.length];
+    let lastStatus: number | undefined;
+
+    for (let attempt = 0; attempt < pool.length; attempt += 1) {
+      const key = pool[(start + attempt) % pool.length];
       try {
         return await this.callSingleKey<T>(key, input);
       } catch (err) {
         lastErr = err;
+        const msg = err instanceof Error ? err.message : String(err);
+        const stMatch = /HTTP\s+(\d{3})/.exec(msg);
+        const code = stMatch ? Number(stMatch[1]) : undefined;
+        lastStatus = code;
+
+        if (code === 401 || code === 403 || /API_KEY_INVALID|API key not valid/i.test(msg)) {
+          this.deadKeys.add(key);
+        } else if ((code === 429 || code === 503) && pool.length === 1) {
+          // Single-key transient rate limit burst: wait briefly and retry once
+          await new Promise((r) => setTimeout(r, 1200));
+          try {
+            return await this.callSingleKey<T>(key, input);
+          } catch (retryErr) {
+            lastErr = retryErr;
+          }
+        }
       }
     }
-    throw lastErr instanceof Error
-      ? lastErr
-      : new Error("密钥池中所有 API Key 请求均失败");
+
+    const errMsg =
+      lastErr instanceof Error ? lastErr.message : "密钥池中所有 API Key 请求均失败";
+    throw new GeminiPoolExhaustedError(
+      `API 密钥池全部不可用或额度耗尽（${errMsg}）`,
+      lastStatus,
+      true,
+    );
   }
 
   private async callSingleKey<T>(

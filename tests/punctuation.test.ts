@@ -11,65 +11,59 @@ describe("punctuation engine across languages", () => {
     const uk = resolvePunctuationRule("乌克兰语");
     const out = formatQuotedBlockLines(
       [
-        "«Коли стикаєшся з проблемами в обов’язку,",
-        "так зване ‘очікування’ веде до істини.»",
+        "«Коли людина працює на землі,",
+        "так зване ‘терпіння’ приносить добрий плід.»",
       ],
       uk,
     );
-    expect(out[0]).toBe("«Коли стикаєшся з проблемами в обов'язку,");
-    expect(out[1]).toBe('так зване "очікування" веде до істини».');
+    expect(out[0]).toBe("«Коли людина працює на землі,");
+    expect(out[1]).toBe('так зване "терпіння" приносить добрий плід».');
   });
 
   it("places period inside quotes for Indonesian full sentences, but outside for standalone titles", () => {
     const idRule = resolvePunctuationRule("印尼语");
     const block = formatQuotedBlockLines(
-      ["“Manusia harus belajar menunggu,", "dan belajar taat”. "],
+      ["“Kita harus belajar bersabar,", "dan bekerja dengan tekun”. "],
       idRule,
     );
-    expect(block[0]).toBe('"Manusia harus belajar menunggu,');
-    expect(block[1]).toBe('dan belajar taat."');
+    expect(block[0]).toBe('"Kita harus belajar bersabar,');
+    expect(block[1]).toBe('dan bekerja dengan tekun."');
 
     const title = formatStandaloneTitle(
-      "Semua Firman Tuhan Adalah Kebenaran",
-      '"All God\'s Words Are the Truth."',
-      "《神的话语都是真理》。",
+      "Lagu Cahaya Pagi",
+      '"Song of Morning Light."',
+      "《晨光之歌》。",
       idRule,
     );
-    expect(title).toBe('"Semua Firman Tuhan Adalah Kebenaran".');
+    expect(title).toBe('"Lagu Cahaya Pagi".');
   });
 
-  it("formats Ukrainian vs Croatian Bible verse ending and citation punctuation accurately", () => {
+  it("formats Ukrainian vs Croatian citation ending punctuation accurately", () => {
     const uk = resolvePunctuationRule("乌克兰语");
     const ukBible = formatBibleBlockAndCitation(
       [
-        "“Бо як блискавка блискає з одного краю піднебесної,",
-        "але перше належить Йому багато постраждати.”",
+        "“На початку було світло,",
+        "і світло осяяло всю землю.”",
       ],
-      "(Буття 17:24–25)",
+      "(Книга 1:1–2)",
       uk,
     );
-    expect(ukBible.verseLines[0]).toBe(
-      "«Бо як блискавка блискає з одного краю піднебесної,",
-    );
-    expect(ukBible.verseLines[1]).toBe(
-      "але перше належить Йому багато постраждати»",
-    );
-    expect(ukBible.citationText).toBe("(Буття 17:24–25).");
+    expect(ukBible.verseLines[0]).toBe("«На початку було світло,");
+    expect(ukBible.verseLines[1]).toBe("і світло осяяло всю землю»");
+    expect(ukBible.citationText).toBe("(Книга 1:1–2).");
 
     const hr = resolvePunctuationRule("克罗");
     const hrBible = formatBibleBlockAndCitation(
       [
-        '"Jer kao što munja izlazi od istoka,',
-        'tako će biti i s dolaskom Sina Čovječjega"',
+        '"U početku bijaše svjetlo,',
+        'i svjetlo obasja svu zemlju"',
       ],
-      "(Mt 24,27).",
+      "(Knj 1,1).",
       hr,
     );
-    expect(hrBible.verseLines[0]).toBe("„Jer kao što munja izlazi od istoka,");
-    expect(hrBible.verseLines[1]).toBe(
-      "tako će biti i s dolaskom Sina Čovječjega.“",
-    );
-    expect(hrBible.citationText).toBe("(Mt 24,27)");
+    expect(hrBible.verseLines[0]).toBe("„U početku bijaše svjetlo,");
+    expect(hrBible.verseLines[1]).toBe("i svjetlo obasja svu zemlju.“");
+    expect(hrBible.citationText).toBe("(Knj 1,1)");
   });
 
   it("marks Korean as singleCitationRowOnly", () => {

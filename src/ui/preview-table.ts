@@ -47,12 +47,7 @@ function wireTablistArrowKeys(tablist: HTMLElement): void {
   });
 }
 
-export function renderPreviewStage(
-  container: HTMLElement,
-  actions: {
-    onLoadSampleDemo: () => void;
-  },
-): void {
+export function renderPreviewStage(container: HTMLElement): void {
   const noticeHtml = store.notice
     ? `
       <div class="notice-bar ${store.notice.type === "error" ? "notice-error" : "notice-info"}" role="status">
@@ -73,16 +68,10 @@ export function renderPreviewStage(
           <h2>准备开始多语种剧本摘录</h2>
           <p>按以下三步即可批量生成各语种工作表并直接写入 Google 表格：</p>
           <ol>
-            <li>点击顶部「Google OAuth 授权」，选择你准备好的 OAuth 2.0 客户端 <code>.json</code> 文件并完成浏览器邮箱登录；</li>
-            <li>在左侧粘贴源剧本链接与专用输出表格链接，点击「读取云端源稿与语种」；</li>
-            <li>勾选需要生成的语种，点击「开始提取并写入 Google 表格」，右侧可逐行核对与点击微调。</li>
+            <li>点击右上角「设置 → Google OAuth 授权」，选择 OAuth 2.0 客户端 <code>.json</code> 文件并完成浏览器邮箱登录；</li>
+            <li>在左侧粘贴云端总配置表、剧本表与专用输出表格链接，点击「读取云端源稿」；</li>
+            <li>勾选需要生成的语种，点击「开始提取并预览」，在右侧逐行核对无误后再点击「确认写入 Google 表格」。</li>
           </ol>
-          <div style="display:flex;gap:0.65rem;flex-wrap:wrap;padding-block-start:0.4rem">
-            <button type="button" id="btn-load-demo" class="btn">
-              ${icons.sparkle}
-              <span>载入 39 期演示样本预览效果</span>
-            </button>
-          </div>
         </div>
       </main>
     `;
@@ -95,9 +84,6 @@ export function renderPreviewStage(
         store.notice = null;
         notifyStateChanged();
       });
-    container
-      .querySelector("#btn-load-demo")
-      ?.addEventListener("click", actions.onLoadSampleDemo);
     return;
   }
 
@@ -154,7 +140,7 @@ export function renderPreviewStage(
             .join("")}
         </div>
       `
-      : `<div style="padding-block:0.5rem;font-weight:600">${esc(doc.title)}${store.isDemoData ? "（合成演示数据）" : ""}</div>`;
+      : `<div style="padding-block:0.5rem;font-weight:600">${esc(doc.title)}</div>`;
 
   const filterTabs: Array<{ id: RowFilterMode; label: string }> = [
     { id: "extractable", label: `待摘录行 (${extractableRowSet.size})` },
@@ -329,7 +315,7 @@ export function renderPreviewStage(
   const searchEl = container.querySelector<HTMLInputElement>("#inp-table-search");
   searchEl?.addEventListener("input", () => {
     store.searchQuery = searchEl.value;
-    renderPreviewStage(container, actions);
+    renderPreviewStage(container);
     const nextSearch = container.querySelector<HTMLInputElement>("#inp-table-search");
     if (nextSearch) {
       nextSearch.focus();

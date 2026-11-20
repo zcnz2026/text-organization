@@ -1,4 +1,9 @@
 import { BUILTIN_PUNCTUATION_RULES } from "../catalog/lang-presets";
+import type {
+  BatchMasterQueue,
+  ImportedSubtitleWorkbook,
+  SubtitleLineBreakRun,
+} from "../linebreak/types";
 import type { UpdateCheckResult } from "../platform/updater";
 import type {
   GeminiModelId,
@@ -25,10 +30,82 @@ const SETTINGS_STORAGE_KEY = "script_lang_workbench_settings_v1";
 const CUSTOM_RULES_KEY = "script_lang_custom_rules_v1";
 const AI_SETTINGS_KEY = "script_lang_ai_config_v1";
 const SCHEMA_STORAGE_KEY = "script_lang_schema_config_v1";
+const UI_TAB_STORAGE_KEY = "script_lang_ui_tab_prefs_v1";
 
+export type MainWorkbenchTab = "extract" | "linebreak";
+export type LineBreakWorkMode = "single" | "batch";
+export type LineBreakRowFilter = "all" | "changed" | "review" | "special";
 export type RowFilterMode = "all" | "extractable" | "missing" | "matched" | "review";
 export type TableWrapMode = "nowrap" | "wrap";
 export type TableFontSize = "sm" | "md" | "lg";
+
+export interface LineBreakUiState {
+  mode: LineBreakWorkMode;
+  sourceSheetUrl: string;
+  outputSheetUrl: string;
+  masterSheetUrl: string;
+  batchQueue: BatchMasterQueue | null;
+  /** Non-empty when user clicked "预览核对" on a specific batch item while in batch mode */
+  batchInspectingItemId: string | null;
+  singlePausedProgress: {
+    done: number;
+    total: number;
+    message: string;
+    isKeyError: boolean;
+  } | null;
+  workbook: ImportedSubtitleWorkbook | null;
+  langCode: string;
+  useAi: boolean;
+  showHiddenCols: boolean;
+  /** User-resized column widths in px keyed by column letter (e.g. { E: 260, G: 340 }) */
+  customColWidths: Record<string, number>;
+  /** Columns manually hidden by the user in preview (e.g. ["B", "C", "D", "K"]) */
+  userHiddenCols: string[];
+  run: SubtitleLineBreakRun | null;
+  filter: LineBreakRowFilter;
+  searchQuery: string;
+}
+
+const LB_COL_PREFS_STORAGE_KEY = "script_lang_lb_col_prefs_v1";
+
+function loadLineBreakColPrefs(): {
+  customColWidths: Record<string, number>;
+  userHiddenCols: string[];
+} {
+  try {
+    const raw = localStorage.getItem(LB_COL_PREFS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as {
+        customColWidths?: Record<string, number>;
+        userHiddenCols?: string[];
+      };
+      return {
+        customColWidths:
+          parsed.customColWidths && typeof parsed.customColWidths === "object"
+            ? parsed.customColWidths
+            : {},
+        userHiddenCols: Array.isArray(parsed.userHiddenCols) ? parsed.userHiddenCols : [],
+      };
+    }
+  } catch {
+    // ignore
+  }
+  return { customColWidths: {}, userHiddenCols: [] };
+}
+
+export function saveLineBreakColPrefs(): void {
+  try {
+    localStorage.setItem(
+      LB_COL_PREFS_STORAGE_KEY,
+      JSON.stringify({
+        customColWidths: store.lineBreak.customColWidths,
+        userHiddenCols: store.lineBreak.userHiddenCols,
+      }),
+    );
+  } catch {
+    // ignore
+  }
+}
 
 export const DEFAULT_TABLE_COL_WIDTHS = [48, 84, 92, 160, 170, 195, 130, 185, 105];
 
@@ -74,7 +151,6 @@ export interface AppState {
   customRules: PunctuationRule[];
   linksByLang: Map<string, LanguageResourceLinks>;
   scriptDoc: ScriptSheetDocument | null;
-  isDemoData: boolean;
   runsByLang: Map<string, LanguageRunOutput>;
   activePreviewLang: string;
   rowFilter: RowFilterMode;
@@ -82,6 +158,8 @@ export interface AppState {
   tableFontSize: TableFontSize;
   tableColWidths: number[];
   searchQuery: string;
+  activeMainTab: MainWorkbenchTab;
+  lineBreak: LineBreakUiState;
   busy: boolean;
   progressPercent: number;
   progressText: string;
@@ -197,6 +275,52 @@ function loadAiPrefs(): {
   };
 }
 
+function loadUiTabPrefs(): {
+  activeMainTab: MainWorkbenchTab;
+  lbMode: LineBreakWorkMode;
+  lbLangCode: string;
+  lbUseAi: boolean;
+  lbSourceUrl: string;
+  lbOutputUrl: string;
+  lbMasterUrl: string;
+} {
+  try {
+    const raw = localStorage.getItem(UI_TAB_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as {
+        activeMainTab?: string;
+        lbMode?: string;
+        lbLangCode?: string;
+        lbUseAi?: boolean;
+        lbSourceUrl?: string;
+        lbOutputUrl?: string;
+        lbMasterUrl?: string;
+      };
+      return {
+        activeMainTab: parsed.activeMainTab === "linebreak" ? "linebreak" : "extract",
+        lbMode: parsed.lbMode === "batch" ? "batch" : "single",
+        lbLangCode: parsed.lbLangCode || "it",
+        lbUseAi: parsed.lbUseAi ?? true,
+        lbSourceUrl: parsed.lbSourceUrl ?? "",
+        lbOutputUrl: parsed.lbOutputUrl ?? "",
+        lbMasterUrl: parsed.lbMasterUrl ?? "",
+      };
+    }
+  } catch {
+    // ignore
+  }
+  return {
+    activeMainTab: "extract",
+    lbMode: "single",
+    lbLangCode: "it",
+    lbUseAi: true,
+    lbSourceUrl: "",
+    lbOutputUrl: "",
+    lbMasterUrl: "",
+  };
+}
+
+const uiTabPrefs = loadUiTabPrefs();
 const aiPrefs = loadAiPrefs();
 const savedSettings = loadSavedSettings();
 const schemaBundle = loadSchemaBundle();
@@ -207,6 +331,8 @@ if (!schemaBundle.cloudConfigUrl && savedSettings.resourceMatrixUrl) {
 if (!schemaBundle.sharedSheets.rosterUrl && savedSettings.rosterSpreadsheetUrl) {
   schemaBundle.sharedSheets.rosterUrl = savedSettings.rosterSpreadsheetUrl;
 }
+
+const lbColPrefs = loadLineBreakColPrefs();
 
 export const store: AppState = {
   settings: savedSettings,
@@ -231,7 +357,6 @@ export const store: AppState = {
   customRules: loadCustomRules(),
   linksByLang: new Map(Object.entries(schemaBundle.linksByLangObj)),
   scriptDoc: null,
-  isDemoData: false,
   runsByLang: new Map(),
   activePreviewLang: "",
   rowFilter: "extractable",
@@ -239,6 +364,25 @@ export const store: AppState = {
   tableFontSize: "sm",
   tableColWidths: loadSavedColWidths(),
   searchQuery: "",
+  activeMainTab: uiTabPrefs.activeMainTab,
+  lineBreak: {
+    mode: uiTabPrefs.lbMode,
+    sourceSheetUrl: uiTabPrefs.lbSourceUrl,
+    outputSheetUrl: uiTabPrefs.lbOutputUrl,
+    masterSheetUrl: uiTabPrefs.lbMasterUrl,
+    batchQueue: null,
+    batchInspectingItemId: null,
+    singlePausedProgress: null,
+    workbook: null,
+    langCode: uiTabPrefs.lbLangCode,
+    useAi: uiTabPrefs.lbUseAi,
+    showHiddenCols: false,
+    customColWidths: lbColPrefs.customColWidths,
+    userHiddenCols: lbColPrefs.userHiddenCols,
+    run: null,
+    filter: "all",
+    searchQuery: "",
+  },
   busy: false,
   progressPercent: 0,
   progressText: "",
@@ -291,6 +435,18 @@ export function notifyStateChanged(): void {
       episodeHymnOverrides: store.episodeHymnOverrides,
     };
     localStorage.setItem(SCHEMA_STORAGE_KEY, JSON.stringify(bundle));
+    localStorage.setItem(
+      UI_TAB_STORAGE_KEY,
+      JSON.stringify({
+        activeMainTab: store.activeMainTab,
+        lbMode: store.lineBreak.mode,
+        lbLangCode: store.lineBreak.langCode,
+        lbUseAi: store.lineBreak.useAi,
+        lbSourceUrl: store.lineBreak.sourceSheetUrl,
+        lbOutputUrl: store.lineBreak.outputSheetUrl,
+        lbMasterUrl: store.lineBreak.masterSheetUrl,
+      }),
+    );
   } catch {
     // ignore storage quota errors
   }
