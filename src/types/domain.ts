@@ -17,13 +17,21 @@ export interface PunctuationRule {
   doubleClose: string;
   singleOpen: string;
   singleClose: string;
+  tertiaryOpen?: string;
+  tertiaryClose?: string;
   apostrophe: string;
   ellipsis: string;
   commaInsideQuote: boolean;
   periodMode: PeriodPlacementMode;
+  periodQuotePattern?: string;
+  exclamQuestionQuotePattern?: string;
   bibleCitationMode: BibleCitationMode;
   singleCitationRowOnly: boolean;
   sentencePeriodChar?: string;
+  preserveInnerQuotes?: boolean;
+  noAdjacentDoubleQuotes?: boolean;
+  noCitationDoubleOpen?: string;
+  noCitationDoubleClose?: string;
   notes?: string;
 }
 
@@ -106,6 +114,7 @@ export interface ProcessedRowResult {
   note: string;
   status: ReviewStatus;
   hint: string;
+  bibleSource?: string;
 }
 
 export interface LanguageRunOutput {
@@ -121,4 +130,6 @@ export interface ScriptSheetDocument {
   headerRows: string[][];
   columnMap: ScriptColumnMap;
   rows: ScriptRow[];
+  sourceSpreadsheetId?: string;
+  sourceSheetId?: number;
 }

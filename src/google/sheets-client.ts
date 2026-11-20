@@ -4,7 +4,7 @@ import type {
   LanguageRunOutput,
   ScriptSheetDocument,
 } from "../types/domain";
-import { colLetterToIndex } from "../types/schema-config";
+import { colLetterToIndex, indexToColLetter } from "../types/schema-config";
 
 export interface SheetTabInfo {
   sheetId: number;
@@ -101,7 +101,7 @@ export class GoogleSheetsClient {
   async fetchRichGrid(
     spreadsheetId: string,
     gidOrTitle?: number | string | null,
-  ): Promise<{ title: string; grid: RichSheetGrid }> {
+  ): Promise<{ title: string; sheetId: number; grid: RichSheetGrid }> {
     const target = await this.resolveSheetTitle(spreadsheetId, gidOrTitle);
     const rangeParam = encodeURIComponent(quoteSheetRange(target.title));
     const fields =
@@ -133,7 +133,7 @@ export class GoogleSheetsClient {
         };
       }),
     );
-    return { title: target.title, grid };
+    return { title: target.title, sheetId: target.sheetId, grid };
   }
 
   async writeLanguageSheet(
@@ -155,108 +155,208 @@ export class GoogleSheetsClient {
       cleanHint && cleanHint !== "AUTO"
         ? colLetterToIndex(cleanHint, maxBaseCols)
         : maxBaseCols;
-    const totalCols = Math.max(maxBaseCols + 1, hintColIdx + 1);
+    const hasBibleSource = run.rows.some((r) => Boolean(r.bibleSource));
+    const bibleSourceColIdx = hasBibleSource ? hintColIdx + 1 : -1;
+    const totalCols = Math.max(maxBaseCols + 1, hintColIdx + 1, bibleSourceColIdx + 1);
     const totalRows = doc.headerRows.length + doc.rows.length + 2;
 
     let finalTitle = sheetTitle.slice(0, 95);
     const existing = meta.sheets.find((s) => s.title === finalTitle);
-    let sheetId: number;
+    let sheetId = 0;
+    let clonedFromSource = false;
 
-    if (existing && overwrite) {
-      sheetId = existing.sheetId;
+    if (!overwrite && existing) {
+      finalTitle = `${finalTitle}_${new Date().toISOString().slice(11, 16).replace(":", "")}`;
+    }
+
+    // Prefer cloning the original Google Sheet directly via copyTo to preserve 100% of fonts,
+    // colors, font sizes, column widths, row heights, borders, and wraps.
+    if (doc.sourceSpreadsheetId && doc.sourceSheetId !== undefined) {
+      try {
+        const copied = await this.request<{ sheetId: number; title: string }>(
+          `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(doc.sourceSpreadsheetId)}/sheets/${doc.sourceSheetId}:copyTo`,
+          {
+            method: "POST",
+            body: JSON.stringify({ destinationSpreadsheetId: outputSpreadsheetId }),
+          },
+        );
+        sheetId = copied.sheetId;
+        const setupReqs: Record<string, unknown>[] = [];
+        if (existing && overwrite) {
+          setupReqs.push({ deleteSheet: { sheetId: existing.sheetId } });
+        }
+        setupReqs.push({
+          updateSheetProperties: {
+            properties: {
+              sheetId,
+              title: finalTitle,
+              gridProperties: {
+                rowCount: Math.max(totalRows, 100),
+                columnCount: totalCols,
+              },
+            },
+            fields: "title,gridProperties(rowCount,columnCount)",
+          },
+        });
+        await this.request(
+          `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(outputSpreadsheetId)}:batchUpdate`,
+          {
+            method: "POST",
+            body: JSON.stringify({ requests: setupReqs }),
+          },
+        );
+        clonedFromSource = true;
+      } catch {
+        clonedFromSource = false;
+      }
+    }
+
+    if (clonedFromSource) {
+      // Write ONLY Target Language, Note, 【工具提示】, and optional 【圣经来源】 columns
+      // using RAW so Google Sheets preserves leading straight single quotes (') verbatim.
+      const headerRowNum = doc.headerRows.length;
+      const startDataRow = headerRowNum + 1;
+      const endDataRow = headerRowNum + doc.rows.length;
+      const qTitle = quoteSheetRange(finalTitle);
+      const targetColL = indexToColLetter(doc.columnMap.targetLanguage);
+      const noteColL = indexToColLetter(doc.columnMap.note);
+      const hintColL = indexToColLetter(hintColIdx);
+
+      const valueRanges: Array<{ range: string; values: string[][] }> = [
+        {
+          range: `${qTitle}!${targetColL}${startDataRow}:${targetColL}${endDataRow}`,
+          values: run.rows.map((r) => [r.targetLanguage ?? ""]),
+        },
+        {
+          range: `${qTitle}!${noteColL}${startDataRow}:${noteColL}${endDataRow}`,
+          values: run.rows.map((r) => [r.note ?? ""]),
+        },
+        {
+          range: `${qTitle}!${hintColL}${headerRowNum}:${hintColL}${endDataRow}`,
+          values: [["【工具提示】"], ...run.rows.map((r) => [r.hint || ""])],
+        },
+      ];
+
+      if (hasBibleSource && bibleSourceColIdx >= 0) {
+        const srcColL = indexToColLetter(bibleSourceColIdx);
+        valueRanges.push({
+          range: `${qTitle}!${srcColL}${headerRowNum}:${srcColL}${endDataRow}`,
+          values: [["【圣经来源】"], ...run.rows.map((r) => [r.bibleSource || ""])],
+        });
+      }
+
       await this.request(
-        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(outputSpreadsheetId)}:batchUpdate`,
+        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(outputSpreadsheetId)}/values:batchUpdate`,
         {
           method: "POST",
           body: JSON.stringify({
-            requests: [
-              {
-                updateSheetProperties: {
-                  properties: {
-                    sheetId,
-                    gridProperties: {
-                      rowCount: Math.max(totalRows, 100),
-                      columnCount: totalCols,
-                      frozenRowCount: doc.headerRows.length,
-                    },
-                  },
-                  fields: "gridProperties(rowCount,columnCount,frozenRowCount)",
-                },
-              },
-              {
-                repeatCell: {
-                  range: { sheetId },
-                  cell: { userEnteredFormat: {} },
-                  fields: "userEnteredFormat.backgroundColor",
-                },
-              },
-            ],
+            valueInputOption: "RAW",
+            data: valueRanges,
           }),
         },
-      );
-      await this.request(
-        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(outputSpreadsheetId)}/values/${encodeURIComponent(quoteSheetRange(finalTitle))}:clear`,
-        { method: "POST", body: "{}" },
       );
     } else {
-      if (existing) {
-        finalTitle = `${finalTitle}_${new Date().toISOString().slice(11, 16).replace(":", "")}`;
-      }
-      const addRes = await this.request<{
-        replies?: Array<{ addSheet?: { properties?: { sheetId?: number } } }>;
-      }>(
-        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(outputSpreadsheetId)}:batchUpdate`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            requests: [
-              {
-                addSheet: {
-                  properties: {
-                    title: finalTitle,
-                    gridProperties: {
-                      rowCount: Math.max(totalRows, 100),
-                      columnCount: totalCols,
-                      frozenRowCount: doc.headerRows.length,
+      if (existing && overwrite) {
+        sheetId = existing.sheetId;
+        await this.request(
+          `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(outputSpreadsheetId)}:batchUpdate`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              requests: [
+                {
+                  updateSheetProperties: {
+                    properties: {
+                      sheetId,
+                      gridProperties: {
+                        rowCount: Math.max(totalRows, 100),
+                        columnCount: totalCols,
+                        frozenRowCount: doc.headerRows.length,
+                      },
+                    },
+                    fields: "gridProperties(rowCount,columnCount,frozenRowCount)",
+                  },
+                },
+                {
+                  repeatCell: {
+                    range: { sheetId },
+                    cell: { userEnteredFormat: {} },
+                    fields: "userEnteredFormat.backgroundColor",
+                  },
+                },
+              ],
+            }),
+          },
+        );
+        await this.request(
+          `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(outputSpreadsheetId)}/values/${encodeURIComponent(quoteSheetRange(finalTitle))}:clear`,
+          { method: "POST", body: "{}" },
+        );
+      } else {
+        const addRes = await this.request<{
+          replies?: Array<{ addSheet?: { properties?: { sheetId?: number } } }>;
+        }>(
+          `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(outputSpreadsheetId)}:batchUpdate`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              requests: [
+                {
+                  addSheet: {
+                    properties: {
+                      title: finalTitle,
+                      gridProperties: {
+                        rowCount: Math.max(totalRows, 100),
+                        columnCount: totalCols,
+                        frozenRowCount: doc.headerRows.length,
+                      },
                     },
                   },
                 },
-              },
-            ],
-          }),
+              ],
+            }),
+          },
+        );
+        sheetId = addRes.replies?.[0]?.addSheet?.properties?.sheetId ?? 0;
+      }
+
+      const outValues: string[][] = doc.headerRows.map((hr, idx) => {
+        const padded = [...hr];
+        while (padded.length < totalCols) padded.push("");
+        padded[hintColIdx] = idx === doc.headerRows.length - 1 ? "【工具提示】" : "";
+        if (hasBibleSource && bibleSourceColIdx >= 0) {
+          padded[bibleSourceColIdx] = idx === doc.headerRows.length - 1 ? "【圣经来源】" : "";
+        }
+        return padded;
+      });
+
+      for (let i = 0; i < doc.rows.length; i += 1) {
+        const src = doc.rows[i];
+        const res = run.rows[i];
+        const rowArr = [...src.rawCells];
+        while (rowArr.length < totalCols) rowArr.push("");
+        rowArr[doc.columnMap.targetLanguage] = res.targetLanguage;
+        rowArr[doc.columnMap.note] = res.note;
+        rowArr[hintColIdx] = res.hint || "";
+        if (hasBibleSource && bibleSourceColIdx >= 0) {
+          rowArr[bibleSourceColIdx] = res.bibleSource || "";
+        }
+        outValues.push(rowArr);
+      }
+
+      await this.request(
+        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(outputSpreadsheetId)}/values/${encodeURIComponent(`${quoteSheetRange(finalTitle)}!A1`)}?valueInputOption=RAW`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ values: outValues }),
         },
       );
-      sheetId = addRes.replies?.[0]?.addSheet?.properties?.sheetId ?? 0;
     }
 
-    const outValues: string[][] = doc.headerRows.map((hr, idx) => {
-      const padded = [...hr];
-      while (padded.length < totalCols) padded.push("");
-      padded[hintColIdx] = idx === doc.headerRows.length - 1 ? "【工具提示】" : "";
-      return padded;
-    });
-
-    for (let i = 0; i < doc.rows.length; i += 1) {
-      const src = doc.rows[i];
-      const res = run.rows[i];
-      const rowArr = [...src.rawCells];
-      while (rowArr.length < totalCols) rowArr.push("");
-      rowArr[doc.columnMap.targetLanguage] = res.targetLanguage;
-      rowArr[doc.columnMap.note] = res.note;
-      rowArr[hintColIdx] = res.hint || "";
-      outValues.push(rowArr);
-    }
-
-    await this.request(
-      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(outputSpreadsheetId)}/values/${encodeURIComponent(`${quoteSheetRange(finalTitle)}!A1`)}?valueInputOption=RAW`,
-      {
-        method: "PUT",
-        body: JSON.stringify({ values: outValues }),
-      },
-    );
-
-    const colorRequests: Record<string, unknown>[] = [
-      {
+    // Apply status background colors ONLY to the 【工具提示】 column (preserve all original column styles!)
+    const colorRequests: Record<string, unknown>[] = [];
+    if (!clonedFromSource) {
+      colorRequests.push({
         repeatCell: {
           range: {
             sheetId,
@@ -273,8 +373,27 @@ export class GoogleSheetsClient {
           },
           fields: "userEnteredFormat(backgroundColor,textFormat.bold)",
         },
-      },
-    ];
+      });
+    } else {
+      colorRequests.push({
+        repeatCell: {
+          range: {
+            sheetId,
+            startRowIndex: doc.headerRows.length - 1,
+            endRowIndex: doc.headerRows.length,
+            startColumnIndex: hintColIdx,
+            endColumnIndex: hasBibleSource ? bibleSourceColIdx + 1 : hintColIdx + 1,
+          },
+          cell: {
+            userEnteredFormat: {
+              backgroundColor: { red: 0.91, green: 0.94, blue: 0.96 },
+              textFormat: { bold: true },
+            },
+          },
+          fields: "userEnteredFormat(backgroundColor,textFormat.bold)",
+        },
+      });
+    }
 
     const headerOffset = doc.headerRows.length;
     for (let i = 0; i < run.rows.length; i += 1) {
@@ -287,21 +406,19 @@ export class GoogleSheetsClient {
             ? { red: 1.0, green: 0.96, blue: 0.84 }
             : { red: 0.93, green: 0.98, blue: 0.95 };
 
-      for (const colIdx of [doc.columnMap.targetLanguage, hintColIdx]) {
-        colorRequests.push({
-          repeatCell: {
-            range: {
-              sheetId,
-              startRowIndex: headerOffset + i,
-              endRowIndex: headerOffset + i + 1,
-              startColumnIndex: colIdx,
-              endColumnIndex: colIdx + 1,
-            },
-            cell: { userEnteredFormat: { backgroundColor: bg } },
-            fields: "userEnteredFormat.backgroundColor",
+      colorRequests.push({
+        repeatCell: {
+          range: {
+            sheetId,
+            startRowIndex: headerOffset + i,
+            endRowIndex: headerOffset + i + 1,
+            startColumnIndex: hintColIdx,
+            endColumnIndex: hintColIdx + 1,
           },
-        });
-      }
+          cell: { userEnteredFormat: { backgroundColor: bg } },
+          fields: "userEnteredFormat.backgroundColor",
+        },
+      });
     }
 
     if (colorRequests.length > 0) {

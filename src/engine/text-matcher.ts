@@ -118,39 +118,87 @@ export function locateParagraphInManuscript(
   const lastZhProbe = normMatchKey(lastRow.chinese).slice(-12);
   const lastEnProbe = normMatchKey(lastRow.english).slice(-28);
 
-  let startIdx = -1;
+  // Additional probes from 2nd row and middle row to disambiguate duplicate opening sentences
+  // (e.g. "为什么人必须追求真理？" appearing in an intro transition before the real passage)
+  const secondRow = sourceRows.length >= 2 ? sourceRows[1] : null;
+  const midRow = sourceRows.length >= 4 ? sourceRows[Math.floor(sourceRows.length / 2)] : null;
+  const secondZhProbe = secondRow ? normMatchKey(secondRow.chinese).slice(0, 14) : "";
+  const secondEnProbe = secondRow ? normMatchKey(secondRow.english).slice(0, 28) : "";
+  const midZhProbe = midRow ? normMatchKey(midRow.chinese).slice(0, 14) : "";
+  const midEnProbe = midRow ? normMatchKey(midRow.english).slice(0, 28) : "";
+
+  const matchesProbe = (p: ArticleParagraph, zhP: string, enP: string) =>
+    (zhP.length >= 4 && normMatchKey(p.chinese).includes(zhP)) ||
+    (enP.length >= 8 && normMatchKey(p.english).includes(enP));
+
+  // Score all candidate starting paragraphs
+  let bestStart = -1;
+  let bestEnd = -1;
+  let bestScore = -1;
+
   for (let i = 0; i < paragraphs.length; i += 1) {
-    const pZh = normMatchKey(paragraphs[i].chinese);
-    const pEn = normMatchKey(paragraphs[i].english);
-    if ((firstZhProbe.length >= 4 && pZh.includes(firstZhProbe)) || (firstEnProbe.length >= 8 && pEn.includes(firstEnProbe))) {
-      // Avoid matching a short title row when we are looking for a multi-row body excerpt
-      if (sourceRows.length >= 3 && paragraphs[i].target.trim().split(/\s+/).length < sourceRows.length && i + 1 < paragraphs.length) {
-        const hasLaterBody = paragraphs.slice(i + 1).some((p) => {
-          const lz = normMatchKey(p.chinese);
-          const le = normMatchKey(p.english);
-          return (firstZhProbe.length >= 4 && lz.includes(firstZhProbe)) || (firstEnProbe.length >= 8 && le.includes(firstEnProbe));
-        });
-        if (hasLaterBody) continue;
+    if (!matchesProbe(paragraphs[i], firstZhProbe, firstEnProbe)) continue;
+    let score = 2;
+    let candEnd = i;
+    const windowMax = Math.min(paragraphs.length, i + 10);
+
+    // Penalize short title rows when looking for a multi-row body passage
+    if (sourceRows.length >= 3 && paragraphs[i].target.trim().split(/\s+/).length < sourceRows.length) {
+      score -= 1;
+    }
+
+    for (let j = i; j < windowMax; j += 1) {
+      if (secondZhProbe && matchesProbe(paragraphs[j], secondZhProbe, secondEnProbe)) {
+        score += j === i ? 6 : 3;
       }
-      startIdx = i;
-      break;
+      if (midZhProbe && matchesProbe(paragraphs[j], midZhProbe, midEnProbe)) {
+        score += 3;
+      }
+      if (matchesProbe(paragraphs[j], lastZhProbe, lastEnProbe)) {
+        score += 5;
+        candEnd = j;
+        break;
+      }
+    }
+    // Prefer tighter spans (e.g. body paragraph starting at i=1 over intro+body spanning 0..1)
+    score -= candEnd - i;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestStart = i;
+      bestEnd = candEnd;
     }
   }
-  if (startIdx < 0) return null;
 
-  let endIdx = startIdx;
-  for (let j = startIdx; j < Math.min(paragraphs.length, startIdx + 5); j += 1) {
-    const pZh = normMatchKey(paragraphs[j].chinese);
-    const pEn = normMatchKey(paragraphs[j].english);
-    if ((lastZhProbe.length >= 4 && pZh.includes(lastZhProbe)) || (lastEnProbe.length >= 8 && pEn.includes(lastEnProbe))) {
-      endIdx = j;
-      break;
-    }
+  if (bestStart < 0) return null;
+  const startIdx = bestStart;
+  const endIdx = bestEnd;
+
+  // If the script has a mid-block omission (…… / 有省略) and multiple paragraphs sit between startIdx and endIdx,
+  // select only the paragraphs that match actual script rows so omitted middle paragraphs are NOT pulled in!
+  const hasMidOmission = sourceRows.slice(0, -1).some(
+    (r) => r.remark.includes("有省略") || r.chinese.includes("……") || r.english.includes("…"),
+  );
+  let selectedParagraphs = paragraphs.slice(startIdx, endIdx + 1);
+  if (hasMidOmission && selectedParagraphs.length > 2) {
+    const rowProbes = sourceRows.map((r) => ({
+      zh: normMatchKey(r.chinese).slice(0, 12),
+      en: normMatchKey(r.english).slice(0, 24),
+    }));
+    const kept = selectedParagraphs.filter((p, idx) => {
+      if (idx === 0 || idx === selectedParagraphs.length - 1) return true;
+      const pZh = normMatchKey(p.chinese);
+      const pEn = normMatchKey(p.english);
+      return rowProbes.some(
+        (pr) => (pr.zh.length >= 4 && pZh.includes(pr.zh)) || (pr.en.length >= 8 && pEn.includes(pr.en)),
+      );
+    });
+    if (kept.length >= 2) selectedParagraphs = kept;
   }
 
-  const combinedTarget = paragraphs.slice(startIdx, endIdx + 1).map((p) => p.target.trim()).filter(Boolean).join(" ");
-  const combinedEn = paragraphs.slice(startIdx, endIdx + 1).map((p) => p.english.trim()).filter(Boolean).join(" ");
-  const fullSpanZh = normMatchKey(paragraphs.slice(startIdx, endIdx + 1).map((p) => p.chinese).join(""));
+  const combinedTarget = selectedParagraphs.map((p) => p.target.trim()).filter(Boolean).join(" ");
+  const combinedEn = selectedParagraphs.map((p) => p.english.trim()).filter(Boolean).join(" ");
+  const fullSpanZh = normMatchKey(selectedParagraphs.map((p) => p.chinese).join(""));
   const allRowsZh = normMatchKey(sourceRows.map((r) => r.chinese).join(""));
 
   if (fullSpanZh.length > allRowsZh.length + 10) {
@@ -224,7 +272,7 @@ export function findBibleVerse(
   entries: BibleEntry[],
   refHint: string,
   verseRows: ScriptRow[],
-): { text: string; targetCitationRef: string; truncatedStart: boolean } | null {
+): { text: string; targetCitationRef: string; truncatedStart: boolean; source?: string } | null {
   if (entries.length === 0 || verseRows.length === 0) return null;
 
   const keyRef = normBibleRef(refHint);
@@ -255,7 +303,13 @@ export function findBibleVerse(
           const mergedBody = parts.map((p) => stripOuterDoubleQuotes(p.body)).join(" ");
           const mergedRef = mergeBibleRangeRef(parts[0].ref, parts[parts.length - 1].ref) || refHint.replace(/^[（(]|[)）.]$/g, "");
           const trunc = verseRows[0]?.remark.includes("涉及截取") || verseRows[0]?.english.includes("…") || verseRows[0]?.english.includes("...");
-          return { text: mergedBody, targetCitationRef: `(${mergedRef})`, truncatedStart: Boolean(trunc) };
+          const mergedSource = [...new Set(collected.map((c) => (c.source || "").trim()).filter(Boolean))].join(" / ");
+          return {
+            text: mergedBody,
+            targetCitationRef: `(${mergedRef})`,
+            truncatedStart: Boolean(trunc),
+            ...(mergedSource ? { source: mergedSource } : {}),
+          };
         }
       }
     }
@@ -304,7 +358,13 @@ export function findBibleVerse(
     verseRows[0]?.remark.includes("涉及截取") ||
     verseRows[0]?.english.includes("…") ||
     verseRows[0]?.english.includes("...");
-  return { text: bodyOnly, targetCitationRef, truncatedStart: Boolean(trunc) };
+  const mergedSource = [...new Set(slice.map((c) => (c.source || "").trim()).filter(Boolean))].join(" / ");
+  return {
+    text: bodyOnly,
+    targetCitationRef,
+    truncatedStart: Boolean(trunc),
+    ...(mergedSource ? { source: mergedSource } : {}),
+  };
 }
 
 export function findIdiomMatch(idioms: IdiomEntry[], chinese: string, english: string): string | null {

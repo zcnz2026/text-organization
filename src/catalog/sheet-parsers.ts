@@ -124,6 +124,7 @@ export function parseBibleLibrarySheet(
   let colZh = colLetterToIndex(m.bibleZhCol, 2);
   let colEn = colLetterToIndex(m.bibleEnCol, 3);
   let colTarget = colLetterToIndex(m.bibleTargetCol, 4);
+  const colSource = optColIdx(m.bibleSourceCol, -1);
 
   if (!cfg) {
     startRow = 1;
@@ -162,8 +163,9 @@ export function parseBibleLibrarySheet(
     const chinese = txt(grid, r, colZh);
     const english = txt(grid, r, colEn);
     const targetText = txt(grid, r, colTarget);
+    const source = colSource >= 0 ? txt(grid, r, colSource) : "";
     if (!targetText || (!chapterRef && !english && !chinese)) continue;
-    entries.push({ chapterRef, chinese, english, targetText });
+    entries.push({ chapterRef, chinese, english, targetText, ...(source ? { source } : {}) });
   }
   return entries;
 }

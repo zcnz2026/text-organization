@@ -16,6 +16,13 @@ export interface BatchSplitRequest {
   aiSourceText: string;
   referenceEn?: string;
   sourceRows: ScriptRow[];
+  suppressAutoEllipsis?: boolean;
+}
+
+export interface SplitResult {
+  lines: string[];
+  usedAi: boolean;
+  hasInversion?: boolean;
 }
 
 const BATCH_SPAN_SCHEMA = {
@@ -27,6 +34,7 @@ const BATCH_SPAN_SCHEMA = {
         type: "object",
         properties: {
           id: { type: "string" },
+          hasInversion: { type: "boolean" },
           spans: {
             type: "array",
             items: {
@@ -78,12 +86,65 @@ export function formatIndexedTokens(tokens: string[]): string {
   return tokens.map((t, i) => `[${i}]${t}`).join(" ");
 }
 
+function encodeThaiDoubleSpaces(text: string, rule: PunctuationRule): string {
+  if (rule.langCode !== "th") return text;
+  return text.replace(/ {2,}/g, " @ ");
+}
+
+function decodeThaiDoubleSpaces(text: string, rule: PunctuationRule): string {
+  if (rule.langCode !== "th") return text;
+  return text
+    .replace(/\s*@\s*/g, "  ")
+    .replace(/^ {2,}/, "")
+    .replace(/ {2,}$/, "");
+}
+
+/**
+ * Post-slice boundary repair:
+ * 1. If line[i] ends with sentence punctuation (.?!。！？) followed by 1 dangling sentence-starter word
+ *    (e.g. "...Tuhan. Jika" or "...обов'язку. Це"), shift that word to the start of line[i+1].
+ * 2. If the LAST line ends with sentence punctuation followed by 1 leaked next-sentence word
+ *    (e.g. "...Sang Pencipta. “Terang", "...semacam ini. Oleh", "...Творця. Це") while the
+ *    last source row clearly ends at a sentence boundary (.?!。！？), trim the leaked trailing word.
+ */
+function repairDanglingSentenceStarters(lines: string[], sourceRows: ScriptRow[]): string[] {
+  const out = [...lines];
+  const trailingWordAfterSentenceRe = /^([\s\S]+?[.!?。！？])\s+([«„“"']?[\p{Lu}\p{Lt}][\p{L}\p{M}'’-]*[,，]?)$/u;
+
+  for (let i = 0; i < out.length - 1; i += 1) {
+    const m = trailingWordAfterSentenceRe.exec(out[i]);
+    if (!m) continue;
+    const nextLine = out[i + 1].trim();
+    // Only shift if next line does NOT start with an uppercase sentence starter or opening quote
+    if (nextLine && !/^[«„“"'A-ZА-ЯЁІЇЄҐ]/u.test(nextLine)) {
+      out[i] = m[1].trim();
+      out[i + 1] = `${m[2]} ${nextLine}`.trim();
+    }
+  }
+
+  // Trim leaked 1-word next-sentence prefix on the very last line
+  const lastIdx = out.length - 1;
+  if (lastIdx >= 0) {
+    const srcLast = sourceRows[lastIdx];
+    const srcEndsSentence = /[.!?。！？]["”»'’]*$/u.test((srcLast?.english || srcLast?.chinese || "").trim());
+    if (srcEndsSentence) {
+      const m = trailingWordAfterSentenceRe.exec(out[lastIdx]);
+      if (m) {
+        out[lastIdx] = m[1].trim();
+      }
+    }
+  }
+
+  return out;
+}
+
 export function sliceTokensBySpans(
   tokens: string[],
   joinSep: string,
   spans: TokenSpan[],
   sourceRows: ScriptRow[],
   rule: PunctuationRule,
+  suppressAutoEllipsis = false,
 ): string[] | null {
   if (!Array.isArray(spans) || spans.length !== sourceRows.length || tokens.length === 0) return null;
   let prevEnd = -1;
@@ -109,7 +170,7 @@ export function sliceTokensBySpans(
     }
     prevEnd = end;
 
-    let chunk = tokens.slice(start, end + 1).join(joinSep).trim();
+    let chunk = decodeThaiDoubleSpaces(tokens.slice(start, end + 1).join(joinSep).trim(), rule);
     if (!chunk) return null;
 
     const row = sourceRows[i];
@@ -117,16 +178,17 @@ export function sliceTokensBySpans(
       chunk = capitalizeFirstLetter(chunk);
     }
     const wantsEllipsis =
-      sp.ellipsis ||
-      row.remark.includes("有省略") ||
-      row.chinese.includes("……") ||
-      row.english.includes("…");
+      !suppressAutoEllipsis &&
+      (sp.ellipsis ||
+        row.remark.includes("有省略") ||
+        row.chinese.includes("……") ||
+        row.english.includes("…"));
     if (wantsEllipsis && !chunk.endsWith(rule.ellipsis) && !chunk.endsWith("...") && !chunk.endsWith("…")) {
       chunk = `${chunk} ${rule.ellipsis}`;
     }
     out.push(chunk);
   }
-  return out;
+  return repairDanglingSentenceStarters(out, sourceRows);
 }
 
 const SINGLE_TEXT_SCHEMA = {
@@ -260,24 +322,29 @@ export function deterministicSplitLines(
 }
 
 const SYSTEM_PROMPT =
-  "你是多语种影视字幕词序号精准定位助手。每个任务提供带 [0][1][2]... 编号的目标语定稿原文，以及需要对齐的若干行中英文字幕。请为每一行返回对应的起止词编号 {start, end}（闭区间，含首尾）。\n" +
-  "规则：\n" +
-  "1. 严格按各行中英文的语义起止边界定界；若剧本只摘录前半句或局部，只选对应的词段，绝不多带后半句。\n" +
-  "2. 相邻两行如无省略则首尾衔接（下一行 start = 上一行 end + 1）；若某行备注有省略，可跳过中间词并设 ellipsis:true。\n" +
-  "3. 若首行备注涉及截取且去掉了句首词，请从新句首词开始并设 cap:true。\n" +
-  "4. 只输出 JSON 词序号，不要重写原文。";
+  "你是多语种影视字幕词序号精准定位助手。每个任务提供带 [0][1][2]... 编号的目标语定稿原文（不可更改的字符串流 Fixed String），以及需要 1:1 对齐的若干行中英文字幕。请为每一行返回对应的起止词编号 {start, end}（闭区间，含首尾）。\n" +
+  "核心硬性规则：\n" +
+  "1. 绝对忠于原文：只输出 JSON 词序号，严禁改写、增删、润色或调整原文语序。若目标语存在倒装句，保持原语序正常分行，并在任务结果中设 hasInversion:true。\n" +
+  "2. 【核心重审项】行首/行尾边界词严格切齐：\n" +
+  "   - 绝不能把属于下一行开头的连接词或新句首词（如 and/dan/Jika/Mengapa/Sebaliknya/Це/Щоб/Тільки/Отже/比如/例如/所以/破折号引语等）留在上一行行末！\n" +
+  "   - 绝不能在最后一行多带下一句的第 1 个词（若本段以句号/问号/感叹号结束，end 必须精准停在句末标点所在的词）。\n" +
+  "3. 局部截取与省略：若目标语原文比中/英文长，只选取与中/英文语义完全对应的词段（多余部分舍弃）；若某行备注有省略或含……，可跳过中间词并设 ellipsis:true；若首行备注涉及截取且去掉了句首词，从新句首词开始并设 cap:true。\n" +
+  "4. 泰语特殊规则：泰文中的 @ 符号代表双空格断句符，切分时保留 @ 不得删除。";
 
 export async function batchSplitTargetsWithAi(
   requests: BatchSplitRequest[],
   rule: PunctuationRule,
   gemini?: GeminiPoolClient,
-): Promise<Map<string, { lines: string[]; usedAi: boolean }>> {
-  const resultMap = new Map<string, { lines: string[]; usedAi: boolean }>();
+): Promise<Map<string, SplitResult>> {
+  const resultMap = new Map<string, SplitResult>();
   if (requests.length === 0) return resultMap;
 
   if (!gemini?.hasKeys) {
     for (const req of requests) {
-      resultMap.set(req.id, { lines: deterministicSplitLines(req.fallbackText, req.sourceRows, rule), usedAi: false });
+      resultMap.set(req.id, {
+        lines: repairDanglingSentenceStarters(deterministicSplitLines(req.fallbackText, req.sourceRows, rule), req.sourceRows),
+        usedAi: false,
+      });
     }
     return resultMap;
   }
@@ -302,7 +369,8 @@ export async function batchSplitTargetsWithAi(
     const tokenized = new Map<string, { tokens: string[]; joinSep: string }>();
     const blocksPrompt = batch
       .map((req) => {
-        const tk = tokenizeForIndexing(req.aiSourceText);
+        const prepared = encodeThaiDoubleSpaces(req.aiSourceText, rule);
+        const tk = tokenizeForIndexing(prepared);
         tokenized.set(req.id, tk);
         const rowsSpec = req.sourceRows
           .map((r, i) => `  (${i + 1}) ZH: ${r.chinese} | EN: ${r.english}${r.remark ? ` | 备注: ${r.remark}` : ""}`)
@@ -314,33 +382,42 @@ export async function batchSplitTargetsWithAi(
 
     try {
       const res = await gemini.generateStructuredJson<{
-        results: Array<{ id: string; spans: TokenSpan[] }>;
+        results: Array<{ id: string; hasInversion?: boolean; spans: TokenSpan[] }>;
       }>({
         systemInstruction: SYSTEM_PROMPT,
         userPrompt: blocksPrompt,
         jsonSchema: BATCH_SPAN_SCHEMA,
       });
 
-      const byId = new Map((res.results ?? []).map((item) => [item.id, item.spans]));
+      const byId = new Map((res.results ?? []).map((item) => [item.id, item]));
       let aiHits = 0;
       for (const req of batch) {
         const tk = tokenized.get(req.id)!;
-        const spans = byId.get(req.id);
-        const sliced = spans ? sliceTokensBySpans(tk.tokens, tk.joinSep, spans, req.sourceRows, rule) : null;
+        const item = byId.get(req.id);
+        const spans = item?.spans;
+        const sliced = spans
+          ? sliceTokensBySpans(tk.tokens, tk.joinSep, spans, req.sourceRows, rule, Boolean(req.suppressAutoEllipsis))
+          : null;
         if (sliced) {
-          resultMap.set(req.id, { lines: sliced, usedAi: true });
+          resultMap.set(req.id, { lines: sliced, usedAi: true, hasInversion: Boolean(item?.hasInversion) });
           aiHits += 1;
         } else {
           const retried = await retrySingleBlockWithTextAlignment(req, rule, gemini);
           if (retried) {
-            resultMap.set(req.id, { lines: retried, usedAi: true });
+            resultMap.set(req.id, {
+              lines: repairDanglingSentenceStarters(retried, req.sourceRows),
+              usedAi: true,
+            });
             aiHits += 1;
           } else {
             diagLog.warn(
               "AI 词序号校验回退",
               `[${rule.langName}] 任务 ${req.id} (返回 ${spans?.length ?? 0} 段 / 需要 ${req.sourceRows.length} 行，词数 ${tk.tokens.length}) 未通过校验，已回退本地切分`,
             );
-            resultMap.set(req.id, { lines: deterministicSplitLines(req.fallbackText, req.sourceRows, rule), usedAi: false });
+            resultMap.set(req.id, {
+              lines: repairDanglingSentenceStarters(deterministicSplitLines(req.fallbackText, req.sourceRows, rule), req.sourceRows),
+              usedAi: false,
+            });
           }
         }
       }
@@ -348,7 +425,10 @@ export async function batchSplitTargetsWithAi(
     } catch (err) {
       diagLog.warn("AI 批量分句回退", `[${rule.langName}] 本批 ${batch.length} 块调用失败，已回退本地切分`, err instanceof Error ? err.message : String(err));
       for (const req of batch) {
-        resultMap.set(req.id, { lines: deterministicSplitLines(req.fallbackText, req.sourceRows, rule), usedAi: false });
+        resultMap.set(req.id, {
+          lines: repairDanglingSentenceStarters(deterministicSplitLines(req.fallbackText, req.sourceRows, rule), req.sourceRows),
+          usedAi: false,
+        });
       }
     }
   }
@@ -361,8 +441,8 @@ export async function splitTargetIntoScriptLines(
   sourceRows: ScriptRow[],
   rule: PunctuationRule,
   gemini?: GeminiPoolClient,
-  opts?: { fullParagraphTarget?: string; referenceEn?: string; isPartial?: boolean },
-): Promise<{ lines: string[]; usedAi: boolean }> {
+  opts?: { fullParagraphTarget?: string; referenceEn?: string; isPartial?: boolean; suppressAutoEllipsis?: boolean },
+): Promise<SplitResult> {
   const needAi = sourceRows.length > 1 || Boolean(opts?.isPartial);
   if (!needAi) {
     return { lines: [stripOuterDoubleQuotes(rawTargetParagraph)], usedAi: false };
@@ -375,10 +455,16 @@ export async function splitTargetIntoScriptLines(
         aiSourceText: opts?.fullParagraphTarget || rawTargetParagraph,
         referenceEn: opts?.referenceEn,
         sourceRows,
+        suppressAutoEllipsis: opts?.suppressAutoEllipsis,
       },
     ],
     rule,
     gemini,
   );
-  return map.values().next().value ?? { lines: deterministicSplitLines(rawTargetParagraph, sourceRows, rule), usedAi: false };
+  return (
+    map.values().next().value ?? {
+      lines: repairDanglingSentenceStarters(deterministicSplitLines(rawTargetParagraph, sourceRows, rule), sourceRows),
+      usedAi: false,
+    }
+  );
 }

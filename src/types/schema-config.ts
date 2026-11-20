@@ -71,6 +71,7 @@ export interface PerLanguageSheetColumnConfig {
   bibleZhCol: string;
   bibleEnCol: string;
   bibleTargetCol: string;
+  bibleSourceCol: string;
 
   idiomHeaderRow: number;
   idiomZhCol: string;
@@ -163,6 +164,7 @@ export const DEFAULT_LANG_SHEET_COLS: PerLanguageSheetColumnConfig = {
   bibleZhCol: "C",
   bibleEnCol: "D",
   bibleTargetCol: "E",
+  bibleSourceCol: "",
 
   idiomHeaderRow: 1,
   idiomZhCol: "F",

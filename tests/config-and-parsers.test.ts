@@ -314,9 +314,8 @@ describe("27+ Language Punctuation Presets from 整理剧本各语言标点符�
     for (const lang of ["印尼语", "希伯来语", "缅甸语", "印地语", "高棉语", "阿拉伯语", "老挝语", "俄语"]) {
       expect(resolvePunctuationRule(lang).ellipsis).toBe("...");
     }
-    for (const lang of ["日语", "韩语"]) {
-      expect(resolvePunctuationRule(lang).ellipsis).toBe("……");
-    }
+    expect(resolvePunctuationRule("日语").ellipsis).toBe("……");
+    expect(resolvePunctuationRule("韩语").ellipsis).toBe("…");
 
     // Nested single quotes
     const ro = resolvePunctuationRule("罗马尼亚语");

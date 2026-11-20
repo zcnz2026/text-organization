@@ -146,13 +146,20 @@ export function buildMultiSheetXlsx(
       `<Relationship Id="rId${sIdx + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${sIdx + 1}.xml"/>`,
     );
 
+    const hasBibleSource = run.rows.some((r) => Boolean(r.bibleSource));
+    const bibleSourceColIdx = hasBibleSource ? hintColIdx + 1 : -1;
+    const sheetTotalCols = Math.max(totalCols, bibleSourceColIdx + 1);
+
     const rowsXml: string[] = [];
     let rNum = 1;
 
     doc.headerRows.forEach((hr, hIdx) => {
       const padded = [...hr];
-      while (padded.length < totalCols) padded.push("");
+      while (padded.length < sheetTotalCols) padded.push("");
       padded[hintColIdx] = hIdx === doc.headerRows.length - 1 ? "【工具提示】" : "";
+      if (hasBibleSource && bibleSourceColIdx >= 0) {
+        padded[bibleSourceColIdx] = hIdx === doc.headerRows.length - 1 ? "【圣经来源】" : "";
+      }
       const cells = padded
         .map(
           (val, cIdx) =>
@@ -166,13 +173,16 @@ export function buildMultiSheetXlsx(
     doc.rows.forEach((src, i) => {
       const res = run.rows[i];
       const arr = [...src.rawCells];
-      while (arr.length < totalCols) arr.push("");
+      while (arr.length < sheetTotalCols) arr.push("");
       arr[doc.columnMap.targetLanguage] = res.targetLanguage;
       arr[doc.columnMap.note] = res.note;
       arr[hintColIdx] = res.hint || "";
+      if (hasBibleSource && bibleSourceColIdx >= 0) {
+        arr[bibleSourceColIdx] = res.bibleSource || "";
+      }
 
       const styleFor = (cIdx: number) => {
-        if (cIdx !== doc.columnMap.targetLanguage && cIdx !== hintColIdx) return 0;
+        if (cIdx !== hintColIdx) return 0;
         if (res.status === "missing") return 2;
         if (res.status === "warning") return 3;
         if (res.status === "matched") return 4;

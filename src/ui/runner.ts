@@ -132,8 +132,11 @@ export async function loadCloudSourceAndMatrix(): Promise<void> {
   startBusy(15, "正在从 Google Sheets 读取源剧本...");
   try {
     const { sheets, docs } = createCloudClients();
-    const { title, grid } = await sheets.fetchRichGrid(srcParsed.id, srcParsed.gid);
-    store.scriptDoc = parseGridToScriptDocument(grid.map((r) => r.map((c) => c.text)), title, store.sourceColConfig);
+    const { title, sheetId, grid } = await sheets.fetchRichGrid(srcParsed.id, srcParsed.gid);
+    const parsedDoc = parseGridToScriptDocument(grid.map((r) => r.map((c) => c.text)), title, store.sourceColConfig);
+    parsedDoc.sourceSpreadsheetId = srcParsed.id;
+    parsedDoc.sourceSheetId = sheetId;
+    store.scriptDoc = parsedDoc;
     store.isDemoData = false;
     store.runsByLang.clear();
     store.progressPercent = 60;

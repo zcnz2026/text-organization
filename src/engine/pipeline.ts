@@ -13,6 +13,7 @@ import {
   type BatchSplitRequest,
   batchSplitTargetsWithAi,
   deterministicSplitLines,
+  type SplitResult,
   splitTargetIntoScriptLines,
 } from "./line-splitter";
 import {
@@ -80,13 +81,26 @@ export async function splitLordsPrayerFullText(
 
   const midRows = blockRows.slice(firstLineLead ? 1 : 0, amenTail ? blockRows.length - 1 : blockRows.length);
   if (midRows.length === 0) return [firstLineLead, amenTail].filter(Boolean);
-  const midSplit = await splitTargetIntoScriptLines(bodyText, midRows, rule, gemini);
+  const midSplit = await splitTargetIntoScriptLines(bodyText, midRows, rule, gemini, {
+    suppressAutoEllipsis: true,
+  });
   return [...(firstLineLead ? [firstLineLead] : []), ...midSplit.lines, ...(amenTail ? [amenTail] : [])];
+}
+
+function buildSplitFullHint(
+  prefix: string,
+  fullText: string,
+  hasInversion?: boolean,
+): string {
+  const inv = hasInversion ? "（含倒装句，已保持原语序）" : "";
+  const cleanFull = fullText.replace(/\s+/g, " ").trim();
+  const base = prefix ? `${prefix}${inv}` : `长句/段落拆分${inv}`;
+  return cleanFull ? `${base}｜完整原文：${cleanFull}` : base;
 }
 
 interface DeferredAiSplit {
   req: BatchSplitRequest;
-  apply: (split: { lines: string[]; usedAi: boolean }) => void;
+  apply: (split: SplitResult) => void;
 }
 
 export async function runLanguageExtractionPipeline(
@@ -216,12 +230,26 @@ async function processSingleTask(
     const sourceFull = fullText || catalog.lordsPrayer.map((p) => p.target).join(" ");
     if (options.gemini?.hasKeys && blockRows.length > 1) {
       deferredSplits.push({
-        req: { id: task.id, fallbackText: sourceFull, aiSourceText: sourceFull, sourceRows: blockRows },
+        req: {
+          id: task.id,
+          fallbackText: sourceFull,
+          aiSourceText: sourceFull,
+          sourceRows: blockRows,
+          suppressAutoEllipsis: true,
+        },
         apply: (split) => {
           task.rowIndices.forEach((rIdx, k) => {
             results[rIdx].targetLanguage = split.lines[k] ?? "";
             results[rIdx].status = "matched";
-            if (split.usedAi && k === 0) results[rIdx].hint = "AI 已按词序号精准切分主祷文";
+            if (k === 0) {
+              results[rIdx].hint = buildSplitFullHint(
+                split.usedAi ? "AI 已按词序号精准切分主祷文" : "主祷文长段拆分",
+                sourceFull,
+                split.hasInversion,
+              );
+            } else {
+              results[rIdx].hint = "同上完整句";
+            }
           });
         },
       });
@@ -231,6 +259,9 @@ async function processSingleTask(
     task.rowIndices.forEach((rIdx, k) => {
       results[rIdx].targetLanguage = splitLines[k] ?? "";
       results[rIdx].status = "matched";
+      if (blockRows.length > 1) {
+        results[rIdx].hint = k === 0 ? buildSplitFullHint("主祷文长段拆分", sourceFull) : "同上完整句";
+      }
     });
     return;
   }
@@ -250,20 +281,35 @@ async function processSingleTask(
       return;
     }
 
-    const applyBibleSplit = (split: { lines: string[]; usedAi: boolean }) => {
+    const applyBibleSplit = (split: SplitResult) => {
       const linesCopy = [...split.lines];
       if (matched.truncatedStart && linesCopy.length > 0 && !linesCopy[0].startsWith(catalog.rule.ellipsis)) {
         linesCopy[0] = `${catalog.rule.ellipsis} ${linesCopy[0]}`;
       }
       const formatted = formatBibleBlockAndCitation(linesCopy, matched.targetCitationRef, catalog.rule);
+      const isMulti = task.rowIndices.length > 1;
       task.rowIndices.forEach((rIdx, k) => {
         results[rIdx].targetLanguage = formatted.verseLines[k];
+        if (matched.source) results[rIdx].bibleSource = matched.source;
         results[rIdx].status = matched.truncatedStart ? "warning" : "matched";
-        if (matched.truncatedStart && k === 0) results[rIdx].hint = "涉及经文句首截取，请核对切分与省略号";
-        else if (split.usedAi && k === 0) results[rIdx].hint = "AI 已按词序号精准分句";
+        if (k === 0) {
+          const baseHint = matched.truncatedStart
+            ? "涉及经文句首截取，请核对切分与省略号"
+            : split.usedAi
+              ? "AI 已按词序号精准分句"
+              : isMulti
+                ? "长句/段落拆分，请核对断行"
+                : "";
+          results[rIdx].hint = isMulti
+            ? buildSplitFullHint(baseHint, matched.text, split.hasInversion)
+            : baseHint;
+        } else if (isMulti) {
+          results[rIdx].hint = "同上完整句";
+        }
       });
       if (task.citationRowIndex !== undefined) {
         results[task.citationRowIndex].targetLanguage = formatted.citationText;
+        if (matched.source) results[task.citationRowIndex].bibleSource = matched.source;
         results[task.citationRowIndex].status = "matched";
       }
     };
@@ -401,28 +447,45 @@ async function extractFromArticleManuscript(
     return;
   }
 
-  const applyArticleSplit = (split: { lines: string[]; usedAi: boolean }) => {
-    const quoted = formatQuotedBlockLines(split.lines, catalog.rule, true);
+  const hasFollowingCitation = Boolean(
+    nextRow && /摘自|卷|话|from the word|\(the word/i.test(`${nextRow.chinese} ${nextRow.english}`),
+  );
+
+  const applyArticleSplit = (split: SplitResult) => {
+    const quoted = formatQuotedBlockLines(split.lines, catalog.rule, true, hasFollowingCitation);
     const hasOmission = blockRows.some((r) => r.remark.includes("有省略") || r.chinese.includes("……"));
+    const isMulti = task.rowIndices.length > 1;
+    const fullForHint = located.matchedText || located.fullParagraphTarget;
 
     task.rowIndices.forEach((rIdx, k) => {
       results[rIdx].targetLanguage = quoted[k];
       const rowTrunc = blockRows[k].remark.includes("涉及截取");
       const rowOmit = blockRows[k].remark.includes("有省略") || blockRows[k].chinese.includes("……");
+      let rowHint = "";
       if (rowTrunc) {
         results[rIdx].status = "warning";
-        results[rIdx].hint = split.usedAi ? "AI 已按词序号精准截取，请顺便核对首字母" : "涉及句首截取（未启用AI），请核对外文截取位置";
+        rowHint = split.usedAi ? "AI 已按词序号精准截取，请顺便核对首字母" : "涉及句首截取（未启用AI），请核对外文截取位置";
       } else if (rowOmit) {
         results[rIdx].status = "warning";
-        results[rIdx].hint = "此处原文中间有省略，请核对省略号衔接";
+        rowHint = "此处原文中间有省略，请核对省略号衔接";
       } else if (located.isPartial && !split.usedAi) {
         results[rIdx].status = "warning";
-        results[rIdx].hint = options.gemini?.hasKeys
+        rowHint = options.gemini?.hasKeys
           ? "AI 分句调用失败（已回退子句估算），请点「缺失日志」下载查看具体报错原因"
           : "局部半句截取（未配置 API 密钥，已按子句估算）";
       } else {
         results[rIdx].status = hasOmission && !split.usedAi ? "warning" : "matched";
-        if (split.usedAi && k === 0) results[rIdx].hint = "AI 已按词序号精准分句";
+        if (split.usedAi && k === 0) rowHint = "AI 已按词序号精准分句";
+      }
+
+      if (isMulti) {
+        if (k === 0) {
+          results[rIdx].hint = buildSplitFullHint(rowHint || "长句/段落拆分，请核对断行", fullForHint, split.hasInversion);
+        } else {
+          results[rIdx].hint = rowHint ? `${rowHint}｜同上完整句` : "同上完整句";
+        }
+      } else {
+        results[rIdx].hint = rowHint;
       }
     });
   };

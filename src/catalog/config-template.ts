@@ -60,7 +60,7 @@ function buildPerLangPairs(scope: string, c: PerLanguageSheetColumnConfig): Tabl
   return [
     makePair(scope, "六本书新摘自", ["表头行", "中文括号摘自", "中文字幕带摘自", "中文篇目", "英文篇目", "外文篇目", "神话单篇链接", "外文单行摘自", "外文括号摘自", "外文字幕带摘自(无留空)"], [String(c.catalogHeaderRow), c.catalogZhBracketCol, c.catalogZhLineCol, c.catalogZhTitleCol, c.catalogEnTitleCol, c.catalogTargetTitleCol, c.catalogDocLinkCol, c.catalogTargetCiteCol, c.catalogTargetBracketCiteCol, c.catalogTargetSubtitleBandCiteCol]),
     makePair(scope, "单篇神话文档", ["固定填1", "中文列序号", "英文列序号", "外文列序号"], ["1", String(c.manuscriptZhColIndex), String(c.manuscriptEnColIndex), String(c.manuscriptTargetColIndex)]),
-    makePair(scope, "圣经经文库", ["表头行", "英文章节", "中文经文", "英文经文", "外文经文"], [String(c.bibleHeaderRow), c.bibleChapterCol, c.bibleZhCol, c.bibleEnCol, c.bibleTargetCol]),
+    makePair(scope, "圣经经文库", ["表头行", "英文章节", "中文经文", "英文经文", "外文经文", "圣经来源列(无留空)"], [String(c.bibleHeaderRow), c.bibleChapterCol, c.bibleZhCol, c.bibleEnCol, c.bibleTargetCol, c.bibleSourceCol]),
     makePair(scope, "新俗语表", ["表头行", "中文", "最新英文", "对应英文", "外文"], [String(c.idiomHeaderRow), c.idiomZhCol, c.idiomEn1Col, c.idiomEn2Col, c.idiomTargetCol]),
     makePair(scope, "诗歌歌词表", ["表头行", "中文", "英文", "外文"], [String(c.hymnHeaderRow), c.hymnZhCol, c.hymnEnCol, c.hymnTargetCol]),
   ];
@@ -153,14 +153,39 @@ export function buildConfigTemplateXlsx(current?: Partial<CloudWorkspaceConfig>)
 
   const rulesTab: StyledSheetTab = {
     title: CONFIG_TEMPLATE_SHEET_NAMES.rules,
-    colWidths: [14, 18, 8, 8, 8, 8, 8, 10, 12, 18, 18, 14, 12],
+    colWidths: [14, 18, 8, 8, 10, 10, 10, 10, 8, 10, 12, 16, 14, 18, 18, 14, 14],
     rows: [
-      { style: 1, cells: ["语系", "识别别名", "左双引号", "右双引号", "内层左单引号", "内层右单引号", "撇号", "剧本省略号", "逗号在引号内", "句号位置", "圣经摘自句点", "仅单排通用摘自", "句末句号(无填无)"] },
+      {
+        style: 1,
+        cells: [
+          "语系", "识别别名", "左双引号", "右双引号", "内层左单引号", "内层右单引号",
+          "三级引号左", "三级引号右", "撇号", "剧本省略号", "逗号在引号内", "句号位置",
+          "句号+引号位置", "问号、感叹号+引号句号位置", "圣经摘自句点", "仅单排通用摘自", "句末句号(无填无)",
+        ],
+      },
       ...langs.map((l) => {
         const r = resolvePunctuationRule(l, rulesList);
         return {
           style: 0,
-          cells: [r.langName, r.aliases.join("、"), r.doubleOpen, r.doubleClose, r.singleOpen, r.singleClose, r.apostrophe, r.ellipsis, r.commaInsideQuote ? "是" : "否", PERIOD_TO_ZH[r.periodMode], BIBLE_TO_ZH[r.bibleCitationMode], r.singleCitationRowOnly ? "是" : "否", r.sentencePeriodChar === "" ? "无" : (r.sentencePeriodChar ?? ".")],
+          cells: [
+            r.langName,
+            r.aliases.join("、"),
+            r.doubleOpen,
+            r.doubleClose,
+            r.singleOpen || "无",
+            r.singleClose || "无",
+            r.tertiaryOpen || "无",
+            r.tertiaryClose || "无",
+            r.apostrophe || "无",
+            r.ellipsis,
+            r.commaInsideQuote ? "是" : "否",
+            PERIOD_TO_ZH[r.periodMode],
+            r.periodQuotePattern || "",
+            r.exclamQuestionQuotePattern || "",
+            BIBLE_TO_ZH[r.bibleCitationMode],
+            r.singleCitationRowOnly ? "是" : "否",
+            r.sentencePeriodChar === "" ? "无" : (r.sentencePeriodChar ?? "."),
+          ],
         };
       }),
     ],
@@ -299,6 +324,7 @@ function applyColumnRow(
     patch.bibleZhCol = colVal(vals[2], defaultLangCols.bibleZhCol);
     patch.bibleEnCol = colVal(vals[3], defaultLangCols.bibleEnCol);
     patch.bibleTargetCol = colVal(vals[4], defaultLangCols.bibleTargetCol);
+    patch.bibleSourceCol = optColVal(vals[5], defaultLangCols.bibleSourceCol);
   } else if (t.includes("俗语")) {
     patch.idiomHeaderRow = intVal(vals[0], defaultLangCols.idiomHeaderRow);
     patch.idiomZhCol = colVal(vals[1], defaultLangCols.idiomZhCol);
@@ -327,8 +353,18 @@ function parsePeriodMode(raw: string, fallback: PeriodPlacementMode): PeriodPlac
 
 function parseBibleMode(raw: string, fallback: BibleCitationMode): BibleCitationMode {
   if (raw === "same_as_english" || raw.includes("同英文")) return "same_as_english";
-  if (raw === "period_inside_quote_no_trailing" || raw.includes("无句点")) return "period_inside_quote_no_trailing";
+  if (raw === "period_inside_quote_no_trailing" || raw.includes("无句点") || raw.includes("引号里面")) {
+    return "period_inside_quote_no_trailing";
+  }
   return fallback;
+}
+
+function cleanQuoteToken(raw: string, fallback: string): string {
+  const t = raw.trim();
+  if (!t) return fallback;
+  if (/^(无|none|-)$/i.test(t)) return "";
+  if (t.length > 6) return fallback; // descriptive note cell (e.g. Korean/Arabic/Ukrainian note)
+  return raw;
 }
 
 export function parseCloudConfigSheets(sheetsByName: Map<string, RichSheetGrid>): CloudWorkspaceConfig {
@@ -391,28 +427,67 @@ export function parseCloudConfigSheets(sheetsByName: Map<string, RichSheetGrid>)
   const gRules = findSheet(sheetsByName, CONFIG_TEMPLATE_SHEET_NAMES.rules, ["3_标点规则", "4_各语种剧本标点规则"]);
   if (gRules) {
     const legacyOffset = cellStr(gRules, 0, 0).includes("代码") ? 1 : 0;
+    const hdrRow = (gRules[0] || []).map((c) => c.text.trim());
+    const hasTertiaryCols = hdrRow.some((h) => h.includes("三级引号"));
+    const hasPatternCols = hdrRow.some((h) => h.includes("句号+引号"));
+    const cApostrophe = legacyOffset + (hasTertiaryCols ? 8 : 6);
+    const cEllipsis = cApostrophe + 1;
+    const cComma = cEllipsis + 1;
+    const cPeriodMode = cComma + 1;
+    const cPeriodPattern = hasPatternCols ? cPeriodMode + 1 : -1;
+    const cExclamPattern = hasPatternCols ? cPeriodMode + 2 : -1;
+    const cBibleMode = hasPatternCols ? cPeriodMode + 3 : cPeriodMode + 1;
+    const cSingleCite = cBibleMode + 1;
+    const cPeriodChar = cSingleCite + 1;
+
     for (let r = 1; r < gRules.length; r += 1) {
       const langName = cellStr(gRules, r, legacyOffset);
       if (!langName) continue;
       const base = resolvePunctuationRule(langName);
       const aliasCell = cellStr(gRules, r, legacyOffset + 1);
       const aliases = aliasCell ? aliasCell.split(/[,，、]/).map((s) => s.trim()).filter(Boolean) : base.aliases;
-      const pc = cellStr(gRules, r, legacyOffset + 12);
+      const rawDoubleOpen = cellStr(gRules, r, legacyOffset + 2, true);
+      const rawDoubleClose = cellStr(gRules, r, legacyOffset + 3, true);
+      const rawSingleOpen = cellStr(gRules, r, legacyOffset + 4, true);
+      const rawSingleClose = cellStr(gRules, r, legacyOffset + 5, true);
+      const rawTertOpen = hasTertiaryCols ? cellStr(gRules, r, legacyOffset + 6, true) : "";
+      const rawTertClose = hasTertiaryCols ? cellStr(gRules, r, legacyOffset + 7, true) : "";
+      const rawApo = cellStr(gRules, r, cApostrophe);
+      const rawComma = cellStr(gRules, r, cComma);
+      const rawPeriodPattern = cPeriodPattern >= 0 ? cellStr(gRules, r, cPeriodPattern) : "";
+      const rawExclamPattern = cExclamPattern >= 0 ? cellStr(gRules, r, cExclamPattern) : "";
+      const rawSingleCite = cellStr(gRules, r, cSingleCite);
+      const pc = cellStr(gRules, r, cPeriodChar);
+
+      const preserveInner = base.preserveInnerQuotes || rawSingleOpen.includes("不要修改") || rawSingleOpen.includes("保持");
+      const noAdjDouble = base.noAdjacentDoubleQuotes || rawSingleOpen.includes("挨一起");
+
       rulesMap.set(langName, {
+        ...base,
         langCode: legacyOffset ? cellStr(gRules, r, 0) || base.langCode : base.langCode,
         langName,
         aliases: aliases.includes(langName) ? aliases : [langName, ...aliases],
-        doubleOpen: cellStr(gRules, r, legacyOffset + 2, true) || base.doubleOpen,
-        doubleClose: cellStr(gRules, r, legacyOffset + 3, true) || base.doubleClose,
-        singleOpen: cellStr(gRules, r, legacyOffset + 4, true) || base.singleOpen,
-        singleClose: cellStr(gRules, r, legacyOffset + 5, true) || base.singleClose,
-        apostrophe: cellStr(gRules, r, legacyOffset + 6) || base.apostrophe,
-        ellipsis: cellStr(gRules, r, legacyOffset + 7) || base.ellipsis,
-        commaInsideQuote: /^(true|1|是|yes)$/i.test(cellStr(gRules, r, legacyOffset + 8)),
-        periodMode: parsePeriodMode(cellStr(gRules, r, legacyOffset + 9), base.periodMode),
-        bibleCitationMode: parseBibleMode(cellStr(gRules, r, legacyOffset + 10), base.bibleCitationMode),
-        singleCitationRowOnly: /^(true|1|是|yes)$/i.test(cellStr(gRules, r, legacyOffset + 11)),
+        doubleOpen: cleanQuoteToken(rawDoubleOpen, base.doubleOpen),
+        doubleClose: cleanQuoteToken(rawDoubleClose, base.doubleClose),
+        singleOpen: cleanQuoteToken(rawSingleOpen, base.singleOpen),
+        singleClose: cleanQuoteToken(rawSingleClose, base.singleClose),
+        ...(hasTertiaryCols
+          ? {
+              tertiaryOpen: cleanQuoteToken(rawTertOpen, base.tertiaryOpen ?? ""),
+              tertiaryClose: cleanQuoteToken(rawTertClose, base.tertiaryClose ?? ""),
+            }
+          : {}),
+        apostrophe: /^(无|none|-)$/i.test(rawApo) ? "" : rawApo || base.apostrophe,
+        ellipsis: cellStr(gRules, r, cEllipsis) || base.ellipsis,
+        commaInsideQuote: rawComma ? /^(true|1|是|yes)$/i.test(rawComma) : base.commaInsideQuote,
+        periodMode: parsePeriodMode(cellStr(gRules, r, cPeriodMode), base.periodMode),
+        ...(rawPeriodPattern ? { periodQuotePattern: rawPeriodPattern } : {}),
+        ...(rawExclamPattern ? { exclamQuestionQuotePattern: rawExclamPattern } : {}),
+        bibleCitationMode: parseBibleMode(cellStr(gRules, r, cBibleMode), base.bibleCitationMode),
+        singleCitationRowOnly: rawSingleCite ? /^(true|1|是|yes)$/i.test(rawSingleCite) : base.singleCitationRowOnly,
         sentencePeriodChar: /^(none|无)$/i.test(pc) ? "" : pc || base.sentencePeriodChar || ".",
+        ...(preserveInner ? { preserveInnerQuotes: true } : {}),
+        ...(noAdjDouble ? { noAdjacentDoubleQuotes: true } : {}),
       });
     }
   }

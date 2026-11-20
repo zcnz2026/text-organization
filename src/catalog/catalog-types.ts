@@ -37,6 +37,7 @@ export interface BibleEntry {
   chinese: string;
   english: string;
   targetText: string;
+  source?: string;
 }
 
 export interface IdiomEntry {
