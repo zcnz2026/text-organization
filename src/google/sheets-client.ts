@@ -105,7 +105,7 @@ export class GoogleSheetsClient {
     const target = await this.resolveSheetTitle(spreadsheetId, gidOrTitle);
     const rangeParam = encodeURIComponent(quoteSheetRange(target.title));
     const fields =
-      "sheets(data(rowData(values(formattedValue,hyperlink,textFormatRuns/format/link/uri,chipRuns/chip/richLinkProperties/uri))))";
+      "sheets(data(rowData(values(formattedValue,hyperlink,textFormatRuns(startIndex,format(link/uri,strikethrough)),chipRuns/chip/richLinkProperties/uri))))";
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?ranges=${rangeParam}&fields=${encodeURIComponent(fields)}`;
     const data = await this.request<{
       sheets?: Array<{
@@ -114,7 +114,10 @@ export class GoogleSheetsClient {
             values?: Array<{
               formattedValue?: string;
               hyperlink?: string;
-              textFormatRuns?: Array<{ format?: { link?: { uri?: string } } }>;
+              textFormatRuns?: Array<{
+                startIndex?: number;
+                format?: { link?: { uri?: string }; strikethrough?: boolean };
+              }>;
               chipRuns?: Array<{ chip?: { richLinkProperties?: { uri?: string } } }>;
             }>;
           }>;
@@ -125,11 +128,23 @@ export class GoogleSheetsClient {
     const rowData = data.sheets?.[0]?.data?.[0]?.rowData ?? [];
     const grid: RichSheetGrid = rowData.map((r) =>
       (r.values ?? []).map((v) => {
+        const text = v.formattedValue ?? "";
         const chipUri = v.chipRuns?.find((c) => c.chip?.richLinkProperties?.uri)?.chip?.richLinkProperties?.uri;
         const runUri = v.textFormatRuns?.find((t) => t.format?.link?.uri)?.format?.link?.uri;
+        const strikeSegments: string[] = [];
+        const runs = v.textFormatRuns ?? [];
+        for (let k = 0; k < runs.length; k += 1) {
+          if (runs[k]?.format?.strikethrough) {
+            const sIdx = runs[k].startIndex ?? 0;
+            const eIdx = k + 1 < runs.length ? (runs[k + 1].startIndex ?? text.length) : text.length;
+            const sub = text.slice(sIdx, eIdx).trim();
+            if (sub) strikeSegments.push(sub);
+          }
+        }
         return {
-          text: v.formattedValue ?? "",
+          text,
           url: v.hyperlink || chipUri || runUri || undefined,
+          ...(strikeSegments.length > 0 ? { strikethroughTexts: strikeSegments } : {}),
         };
       }),
     );

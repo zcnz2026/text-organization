@@ -120,7 +120,12 @@ export async function loadCloudSourceAndMatrix(): Promise<void> {
   try {
     const { sheets, docs } = createCloudClients();
     const { title, sheetId, grid } = await sheets.fetchRichGrid(srcParsed.id, srcParsed.gid);
-    const parsedDoc = parseGridToScriptDocument(grid.map((r) => r.map((c) => c.text)), title, store.sourceColConfig);
+    const parsedDoc = parseGridToScriptDocument(
+      grid.map((r) => r.map((c) => c.text)),
+      title,
+      store.sourceColConfig,
+      grid,
+    );
     parsedDoc.sourceSpreadsheetId = srcParsed.id;
     parsedDoc.sourceSheetId = sheetId;
     store.scriptDoc = parsedDoc;

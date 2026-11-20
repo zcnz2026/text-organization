@@ -639,36 +639,214 @@
   box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.45);
 }
 
-/* Soft light-blue row background to visually distinguish multi-screen split pairs */
-.gs-split-first > .gs-cell:not(.gs-has-fill) {
+/* Alternating Group A (Sky Blue) & Group B (Violet) visual grouping for consecutive multi-screen splits */
+.gs-split-group-a.gs-split-first > .gs-cell:not(.gs-has-fill) {
   background-color: #eff6ff;
 }
 
-.gs-split-cont > .gs-cell:not(.gs-has-fill) {
+.gs-split-group-a.gs-split-cont > .gs-cell:not(.gs-has-fill) {
   background-color: #e0effe;
 }
 
-.gs-split-row > .gs-target-td:not(.gs-has-fill) {
-  box-shadow: inset 3px 0 0 #3b82f6;
-}
-
-.gs-split-row > .gs-row-num {
+.gs-split-group-a > .gs-row-num {
   background-color: #dbeafe;
   color: #1d4ed8;
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+
+.gs-split-group-a > .gs-target-td:not(.gs-has-fill):not(.gs-cell-manual-edited) {
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+
+.gs-split-group-b.gs-split-first > .gs-cell:not(.gs-has-fill) {
+  background-color: #f5f3ff;
+}
+
+.gs-split-group-b.gs-split-cont > .gs-cell:not(.gs-has-fill) {
+  background-color: #ede9fe;
+}
+
+.gs-split-group-b > .gs-row-num {
+  background-color: #e4ddff;
+  color: #6d28d9;
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 #7c3aed;
+}
+
+.gs-split-group-b > .gs-target-td:not(.gs-has-fill):not(.gs-cell-manual-edited) {
+  box-shadow: inset 3px 0 0 #7c3aed;
+}
+
+/* Dashed divider inside the SAME split group; solid bold outer boundaries separating adjacent groups */
+.gs-split-row:not(.gs-split-end) > .gs-cell,
+.gs-split-row:not(.gs-split-end) > .gs-row-num {
+  border-block-end: 1px dashed #93c5fd;
+}
+
+.gs-split-group-b:not(.gs-split-end) > .gs-cell,
+.gs-split-group-b:not(.gs-split-end) > .gs-row-num {
+  border-block-end: 1px dashed #c4b5fd;
+}
+
+.gs-split-group-a.gs-split-start > .gs-cell,
+.gs-split-group-a.gs-split-start > .gs-row-num {
+  border-block-start: 2px solid #60a5fa;
+}
+
+.gs-split-group-a.gs-split-end > .gs-cell,
+.gs-split-group-a.gs-split-end > .gs-row-num {
+  border-block-end: 2px solid #2563eb;
+}
+
+.gs-split-group-b.gs-split-start > .gs-cell,
+.gs-split-group-b.gs-split-start > .gs-row-num {
+  border-block-start: 2px solid #a78bfa;
+}
+
+.gs-split-group-b.gs-split-end > .gs-cell,
+.gs-split-group-b.gs-split-end > .gs-row-num {
+  border-block-end: 2px solid #7c3aed;
+}
+
+/* Frozen Col A parent/child tree connector & screen badge */
+.lb-line-group-head,
+.lb-line-group-child {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  line-height: 1.2;
+}
+
+.lb-line-group-child {
+  flex-direction: row;
+  gap: 3px;
+}
+
+.lb-line-num {
+  font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
 
-:root[data-theme="dark"] .gs-split-first > .gs-cell:not(.gs-has-fill) {
-  background-color: color-mix(in srgb, #3b82f6 15%, var(--bg-surface));
+.lb-tree-branch {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.78rem;
+  color: #2563eb;
 }
 
-:root[data-theme="dark"] .gs-split-cont > .gs-cell:not(.gs-has-fill) {
-  background-color: color-mix(in srgb, #3b82f6 23%, var(--bg-surface));
+.gs-split-group-b .lb-tree-branch {
+  color: #7c3aed;
 }
 
-:root[data-theme="dark"] .gs-split-row > .gs-row-num {
+.lb-screen-pill {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 4px;
+  background-color: #dbeafe;
+  color: #1d4ed8;
+  white-space: nowrap;
+}
+
+.gs-split-group-b .lb-screen-pill {
+  background-color: #ede9fe;
+  color: #6d28d9;
+}
+
+.lb-screen-pill-cont {
+  opacity: 0.92;
+}
+
+/* Manual edit / split / merge visual marker (crisp red border + badge) */
+.gs-row-manual > .gs-row-num {
+  background-color: #fee2e2;
+  color: #b91c1c;
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 #dc2626;
+}
+
+.gs-cell-manual-edited {
+  box-shadow: inset 0 0 0 2px #dc2626 !important;
+}
+
+.gs-row-manual-latest > .gs-cell-manual-edited {
+  box-shadow: inset 0 0 0 2.5px #dc2626 !important;
+  background-color: color-mix(in srgb, #fee2e2 45%, var(--bg-surface));
+}
+
+.lb-manual-badge {
+  display: inline-block;
+  font-size: 0.64rem;
+  font-weight: 700;
+  line-height: 1.25;
+  padding: 0 4px;
+  border-radius: 4px;
+  background-color: #dc2626;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.col-chip-manual {
+  border-color: rgba(220, 38, 38, 0.45);
+  background-color: #fef2f2;
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+:root[data-theme="dark"] .gs-split-group-a.gs-split-first > .gs-cell:not(.gs-has-fill) {
+  background-color: color-mix(in srgb, #3b82f6 14%, var(--bg-surface));
+}
+
+:root[data-theme="dark"] .gs-split-group-a.gs-split-cont > .gs-cell:not(.gs-has-fill) {
+  background-color: color-mix(in srgb, #3b82f6 22%, var(--bg-surface));
+}
+
+:root[data-theme="dark"] .gs-split-group-a > .gs-row-num {
   background-color: color-mix(in srgb, #2563eb 30%, var(--bg-surface));
   color: #93c5fd;
+}
+
+:root[data-theme="dark"] .gs-split-group-b.gs-split-first > .gs-cell:not(.gs-has-fill) {
+  background-color: color-mix(in srgb, #8b5cf6 15%, var(--bg-surface));
+}
+
+:root[data-theme="dark"] .gs-split-group-b.gs-split-cont > .gs-cell:not(.gs-has-fill) {
+  background-color: color-mix(in srgb, #8b5cf6 24%, var(--bg-surface));
+}
+
+:root[data-theme="dark"] .gs-split-group-b > .gs-row-num {
+  background-color: color-mix(in srgb, #7c3aed 32%, var(--bg-surface));
+  color: #c4b5fd;
+}
+
+:root[data-theme="dark"] .lb-screen-pill {
+  background-color: rgba(59, 130, 246, 0.25);
+  color: #93c5fd;
+}
+
+:root[data-theme="dark"] .gs-split-group-b .lb-screen-pill {
+  background-color: rgba(139, 92, 246, 0.28);
+  color: #c4b5fd;
+}
+
+:root[data-theme="dark"] .gs-row-manual > .gs-row-num {
+  background-color: rgba(220, 38, 38, 0.28);
+  color: #fca5a5;
+}
+
+:root[data-theme="dark"] .gs-cell-manual-edited {
+  box-shadow: inset 0 0 0 2px #f87171 !important;
+}
+
+:root[data-theme="dark"] .col-chip-manual {
+  background-color: rgba(220, 38, 38, 0.2);
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.45);
 }
 
 /* Column Visibility Popover (explicit anchor + viewport-aware-dropdowns compliant) */

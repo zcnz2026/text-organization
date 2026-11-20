@@ -199,21 +199,22 @@ export function parseIdiomGlossarySheet(
   let colEnB = colLetterToIndex(m.idiomEn2Col, 8);
   let colTarget = colLetterToIndex(m.idiomTargetCol, 9);
 
-  if (!cfg) {
-    for (let r = 0; r < Math.min(grid.length, 4); r += 1) {
+  const headerCheckText = txt(grid, Math.max(0, startRow - 1), colZh);
+  if (!cfg || (!/中文|chinese/i.test(headerCheckText) && grid.length > 1)) {
+    for (let r = 0; r < Math.min(grid.length, 5); r += 1) {
       const row = grid[r] || [];
-      const fZh = row.findIndex((c) => c.text.includes("中文"));
+      const fZh = row.findIndex((c) => /中文|chinese/i.test(c.text));
       if (fZh >= 0) {
         startRow = r + 1;
         colZh = fZh;
         colEnA = fZh + 1;
         const fTarget = row.findIndex(
           (c, idx) =>
-            idx > fZh + 1 && !/英文|一致|来源|日期|状态/.test(c.text) && c.text.trim().length > 0,
+            idx > fZh + 1 && !/英文|english|一致|来源|日期|状态|备注/i.test(c.text) && c.text.trim().length > 0,
         );
         if (fTarget >= 0) {
           colTarget = fTarget;
-          colEnB = fTarget - 1;
+          colEnB = Math.max(colEnA, fTarget - 1);
         }
         break;
       }

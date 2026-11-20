@@ -46,15 +46,19 @@ function extractCellUrl(cell?: GridCellValue): string {
   return "";
 }
 
-async function runWithConcurrency<T, R>(
+export async function runWithConcurrency<T, R>(
   items: T[],
   limit: number,
   worker: (item: T, index: number) => Promise<R>,
+  shouldStop?: () => boolean,
 ): Promise<R[]> {
+  if (items.length === 0) return [];
+  const maxWorkers = Math.max(1, Math.min(items.length, Math.floor(limit) || 1));
   const results: R[] = new Array(items.length);
   let cursor = 0;
-  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+  const runners = Array.from({ length: maxWorkers }, async () => {
     while (cursor < items.length) {
+      if (shouldStop?.()) return;
       const idx = cursor;
       cursor += 1;
       results[idx] = await worker(items[idx], idx);

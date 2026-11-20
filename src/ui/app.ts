@@ -184,7 +184,8 @@ export async function mountWorkbenchApp(appRoot: HTMLElement): Promise<void> {
         onExportXlsx: exportLineBreakXlsx,
         onLoadBatchMaster: () => void importBatchMasterFromGoogleUrl(),
         onImportBatchMasterFile: (file) => void importBatchMasterLocalFile(file),
-        onRunBatchAll: () => void executeBatchLineBreakQueue(),
+        onRunBatchAll: () => void executeBatchLineBreakQueue({ autoWrite: false }),
+        onRunBatchAutoWrite: () => void executeBatchLineBreakQueue({ autoWrite: true }),
         onWriteBatchAll: () => void writeConfirmedBatchItemsToGoogleSheets(),
         onOpenSettings: openSettingsDialog,
         onOpenGeminiDialog: openGeminiDialog,
@@ -198,8 +199,8 @@ export async function mountWorkbenchApp(appRoot: HTMLElement): Promise<void> {
         renderLineBreakBatchStage(slotLbStage, {
           onLoadBatchMaster: () => void importBatchMasterFromGoogleUrl(),
           onConfirmMultiSheets: () => void confirmPendingMultiSheetItemsInteractive(),
-          onRunBatchAll: () => void executeBatchLineBreakQueue(),
-          onRunSingleItem: (itemId) => void executeBatchLineBreakQueue(itemId),
+          onRunBatchAll: () => void executeBatchLineBreakQueue({ autoWrite: false }),
+          onRunSingleItem: (itemId) => void executeBatchLineBreakQueue({ singleTargetId: itemId }),
           onWriteBatchAll: () => void writeConfirmedBatchItemsToGoogleSheets(),
           onWriteSingleItem: (itemId) => void writeConfirmedBatchItemsToGoogleSheets(itemId),
           onInspectItem: (itemId) => void inspectBatchItemInPreview(itemId),
@@ -213,6 +214,8 @@ export async function mountWorkbenchApp(appRoot: HTMLElement): Promise<void> {
           onMergeScreen: mergeScreenWithPreviousManual,
           onResumeSingle: () => void executeSubtitleLineBreak(),
           onOpenGeminiSettings: openGeminiDialog,
+          onWriteInspectingBatchItem: (itemId) =>
+            void writeConfirmedBatchItemsToGoogleSheets(itemId),
         });
       }
     }

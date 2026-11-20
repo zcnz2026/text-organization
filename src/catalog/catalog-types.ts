@@ -3,6 +3,7 @@ import type { PunctuationRule } from "../types/domain";
 export interface HyperlinkedCell {
   text: string;
   url?: string;
+  strikethroughTexts?: string[];
 }
 
 export type RichSheetGrid = HyperlinkedCell[][];

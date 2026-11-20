@@ -2,10 +2,25 @@ import { describe, expect, it } from "vitest";
 import { BUILTIN_PUNCTUATION_RULES, resolvePunctuationRule } from "../src/catalog/lang-presets";
 import { parseBibleLibrarySheet } from "../src/catalog/sheet-parsers";
 import { parseGridToScriptDocument } from "../src/engine/csv-sheet";
-import { sliceTokensBySpans, tokenizeForIndexing } from "../src/engine/line-splitter";
+import {
+  auditAndRepairBilingualAlignment,
+  projectLinesOntoVerbatimSource,
+  sliceTokensBySpans,
+  tokenizeForIndexing,
+} from "../src/engine/line-splitter";
 import { runLanguageExtractionPipeline } from "../src/engine/pipeline";
-import { formatBibleBlockAndCitation, formatQuotedBlockLines } from "../src/engine/punctuation";
-import { findBibleVerse, locateParagraphInManuscript } from "../src/engine/text-matcher";
+import {
+  formatBibleBlockAndCitation,
+  formatQuotedBlockLines,
+  formatStandaloneTitle,
+} from "../src/engine/punctuation";
+import {
+  dedupeRepeatedLyricClause,
+  extractTruncatedSentencePair,
+  findBibleVerse,
+  locateParagraphInManuscript,
+  parseTruncationSpec,
+} from "../src/engine/text-matcher";
 import { buildMultiSheetXlsx } from "../src/engine/xlsx-export";
 import type { ScriptRow } from "../src/types/domain";
 
@@ -220,7 +235,9 @@ describe("quote nesting, disambiguation, span boundary repair & source column", 
       { enableRosterPreFill: false },
     );
 
-    expect(inlineOut.rows.some((r) => r.hint.includes("完整原文："))).toBe(true);
+    // Non-truncated multi-row split blocks keep hint clean (no full-paragraph dump)
+    expect(inlineOut.rows[0].hint).toBe("");
+    expect(inlineOut.rows[1].hint).toBe("");
     expect(inlineOut.rows[2].targetLanguage).toBe("«На початку світло осяяло землю» (Буття 1:1).");
     expect(inlineOut.rows[2].bibleSource).toBe("标准译本");
 
@@ -229,5 +246,98 @@ describe("quote nesting, disambiguation, span boundary repair & source column", 
     expect(xlsxStr).toContain("【工具提示】");
     expect(xlsxStr).toContain("【圣经来源】");
     expect(xlsxStr).toContain("标准译本");
+  });
+
+  it("extracts only truncated sentence + following sentence for 截取 hints and capitalizes Cyrillic start", () => {
+    const fullEn =
+      "Introductory background sentence one. On a large-scale, the foremost reason is that, looking at it from this perspective, it relates to planning. Furthermore, this is part of the overall blueprint. Trailing unrelated sentence four. Trailing sentence five.";
+    const fullUk =
+      "Вступне речення один. Говорячи загалом, найголовніша причина полягає в тому, що це стосується планування. Крім того, це частина загального задуму. Четверте речення. П'яте речення.";
+    const row = makeRow(
+      5,
+      "最主要的一条就是从这方面来看，",
+      "The foremost reason is that, looking at it from this perspective,",
+      "涉及截取：On a large-scale, the foremost reason is that, looking at it from this perspective,",
+    );
+
+    const spec = parseTruncationSpec(row);
+    expect(spec.hasTruncation).toBe(true);
+    expect(spec.deletedEnPrefix).toBe("On a large-scale,");
+
+    const pair = extractTruncatedSentencePair(fullUk, fullEn, row);
+    expect(pair).toBe(
+      "Говорячи загалом, найголовніша причина полягає в тому, що це стосується планування. Крім того, це частина загального задуму.",
+    );
+    expect(pair).not.toContain("Вступне речення");
+    expect(pair).not.toContain("П'яте речення");
+
+    const ukRule = resolvePunctuationRule("乌克兰语");
+    const repaired = auditAndRepairBilingualAlignment(
+      ["найголовніша причина полягає в тому, що це стосується планування та", "частини задуму."],
+      [
+        row,
+        makeRow(6, "与整体规划息息相关。", "and relates to part of the blueprint."),
+      ],
+      ukRule,
+    );
+    expect(repaired[0]).toBe("Найголовніша причина полягає в тому, що це стосується планування");
+    expect(repaired[1]).toBe("та частини задуму.");
+  });
+
+  it("projects AI text slices verbatim onto source and disambiguates multi-verse ranges & punctuation", () => {
+    const src = "Коли ти стикаєшся з труднощами, й не знаєш, як діяти далі, яке рішення прийняти?";
+    const projected = projectLinesOntoVerbatimSource(src, [
+      "Коли ти стикаєшся з труднощами",
+      "й не знаєш, як діяти далі,",
+      "яке рішення прийняти?",
+    ]);
+    expect(projected).toEqual([
+      "Коли ти стикаєшся з труднощами,",
+      "й не знаєш, як діяти далі,",
+      "яке рішення прийняти?",
+    ]);
+
+    // Multi-verse range lookup with localized book name + empty first ref -> preserves 15–17
+    const entries = [
+      {
+        chapterRef: "Mat 24:27",
+        chinese: "闪电从东边发出，直照到西边。",
+        english: "For as the lightning comes out of the east and shines to the west.",
+        targetText: '"Sama seperti kilat memancar dari timur" (Matius 24:27).',
+      },
+      {
+        chapterRef: "Luk 17:24",
+        chinese: "因为人子在他日子，好像闪电从天这边一闪直照到天那边。",
+        english: "For as the lightning that lightens out of one part under heaven shines to the other part.",
+        targetText: '"Sebab sama seperti kilat memancar dari ujung langit"',
+      },
+      {
+        chapterRef: "Luk 17:25",
+        chinese: "只是他必须先受许多苦，又被这世代弃绝。",
+        english: "But first must He suffer many things, and be rejected of this generation.",
+        targetText: '"Tetapi Ia harus menanggung banyak penderitaan dahulu" (Lukas 17:25).',
+      },
+    ];
+    const hit = findBibleVerse(entries, "(Luke 17:24–25).", [
+      makeRow(1, "“因为人子在他日子，", '"For as the lightning,'),
+      makeRow(2, "只是他必须先受许多苦”", 'But first must He suffer many things"'),
+    ]);
+    expect(hit?.targetCitationRef).toBe("(Lukas 17:24–25)");
+    expect(hit?.text).toContain("menanggung banyak penderitaan");
+
+    // Ukrainian ?». / !». and standalone title English-first punctuation and lyric dedupe
+    const ukRule = resolvePunctuationRule("乌克兰语");
+    expect(formatQuotedBlockLines(["Це дуже важливе питання!"], ukRule, true)[0]).toBe(
+      "«Це дуже важливе питання!».",
+    );
+    expect(
+      formatStandaloneTitle("Назва твору", '"Title of the Work."', "《作品标题》，", ukRule),
+    ).toBe("«Назва твору».");
+    expect(
+      dedupeRepeatedLyricClause(
+        "Світло осяює шлях. Світло осяює шлях.",
+        "Light illuminates the path.",
+      ),
+    ).toBe("Світло осяює шлях.");
   });
 });

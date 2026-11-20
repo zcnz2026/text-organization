@@ -1,3 +1,4 @@
+import type { RichSheetGrid } from "../catalog/catalog-types";
 import type {
   ScriptColumnMap,
   ScriptRow,
@@ -71,6 +72,7 @@ export function parseGridToScriptDocument(
   grid: string[][],
   title = "Script",
   colConfig?: Partial<SourceScriptColumnConfig>,
+  richGrid?: RichSheetGrid,
 ): ScriptSheetDocument {
   const cfg: SourceScriptColumnConfig = {
     ...DEFAULT_SOURCE_COL_CONFIG,
@@ -139,6 +141,11 @@ export function parseGridToScriptDocument(
   const rows: ScriptRow[] = [];
   for (let i = headerIdx + 1; i < grid.length; i += 1) {
     const r = grid[i];
+    const richRow = richGrid?.[i];
+    const strikes = [
+      ...(richRow?.[columnMap.remark]?.strikethroughTexts ?? []),
+      ...(richRow?.[columnMap.note]?.strikethroughTexts ?? []),
+    ];
     rows.push({
       rowIndex: i - (headerIdx + 1),
       rawCells: [...r],
@@ -154,6 +161,7 @@ export function parseGridToScriptDocument(
       sendRemark: get(r, columnMap.sendRemark),
       filterCategory: get(r, columnMap.filterCategory),
       needExtract: get(r, columnMap.needExtract),
+      ...(strikes.length > 0 ? { strikethroughTexts: strikes } : {}),
     });
   }
 

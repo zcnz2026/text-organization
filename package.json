@@ -1,6 +1,6 @@
 {
   "name": "text-organization",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "description": "文字整理工具 — 多语种剧本摘录整理与字幕自动断行工具 (Tauri v2 + TypeScript)",

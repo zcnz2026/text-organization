@@ -65,7 +65,7 @@ export const BUILTIN_PUNCTUATION_RULES: PunctuationRule[] = [
   r("fr", "法语", ["法语", "法文", "法国", "french", "fr"], "« ", " »", '"', '"', "'", "[…]", false, "outside", { tertiaryOpen: "'", tertiaryClose: "'", bibleCitationMode: "period_inside_quote_no_trailing" }),
   r("it", "意大利语", ["意大利语", "意语", "意大利", "italian", "it"], '"', '"', "'", "'", "'", "[…]", false, "outside", { tertiaryOpen: '"', tertiaryClose: '"' }),
   r("ru", "俄语", ["俄语", "俄文", "俄罗斯", "russian", "ru"], "«", "»", "„", "“", "", "...", false, "outside", { tertiaryOpen: "«", tertiaryClose: "»" }),
-  r("uk", "乌克兰语", ["乌克兰语", "乌语", "乌克兰", "ukrainian", "uk"], "«", "»", '"', '"', "'", "…", false, "outside", { tertiaryOpen: "'", tertiaryClose: "'", notes: "三层引号用法：« ' \" \" ' »" }),
+  r("uk", "乌克兰语", ["乌克兰语", "乌语", "乌克兰", "ukrainian", "uk"], "«", "»", '"', '"', "'", "…", false, "outside", { tertiaryOpen: "'", tertiaryClose: "'", exclamQuestionQuotePattern: "?».\n!».", notes: "三层引号用法：« ' \" \" ' »" }),
   r("pl", "波兰语", ["波兰语", "波语", "波兰", "polish", "pl"], "„", "”", "»", "«", "", "(…)", false, "outside", { tertiaryOpen: "„", tertiaryClose: "”" }),
   r("tl", "菲律宾语", ["菲律宾语", "菲语", "菲律宾", "他加禄语", "tagalog", "filipino", "tl", "fil"], '"', '"', "'", "'", "'", "…", true, "inside", { tertiaryOpen: '"', tertiaryClose: '"' }),
   r("ne", "尼泊尔语", ["尼泊尔语", "尼泊尔", "nepali", "ne"], "“", "”", "‘", "’", "", "…", true, "inside", { tertiaryOpen: "“", tertiaryClose: "”", sentencePeriodChar: "।" }),

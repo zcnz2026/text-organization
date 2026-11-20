@@ -82,6 +82,7 @@ export interface ScriptRow {
   sendRemark: string;
   filterCategory: string;
   needExtract: string;
+  strikethroughTexts?: string[];
 }
 
 export type BlockKind =

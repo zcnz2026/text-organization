@@ -26,6 +26,7 @@ export interface LineBreakPanelActions {
   onLoadBatchMaster: () => void;
   onImportBatchMasterFile: (file: File) => void;
   onRunBatchAll: () => void;
+  onRunBatchAutoWrite: () => void;
   onWriteBatchAll: () => void;
   onOpenSettings: () => void;
   onOpenGeminiDialog: () => void;
@@ -54,8 +55,18 @@ export function renderLineBreakPanel(
     const q = lb.batchQueue;
     const totalCount = q?.items.length ?? 0;
     const readyCount = q?.items.filter((i) => i.status === "ready_review").length ?? 0;
+    const runningCount = q?.items.filter((i) => i.status === "running" || i.status === "writing").length ?? 0;
     const completedCount = q?.items.filter((i) => i.status === "completed").length ?? 0;
     const pausedCount = q?.items.filter((i) => i.status === "paused_key").length ?? 0;
+    const isImportingMaster = store.busy;
+    const isBatchActive = lb.batchRunning;
+
+    const concurrencyOpts = [1, 2, 3, 5, 8, 10]
+      .map(
+        (n) =>
+          `<option value="${n}" ${lb.batchConcurrency === n ? "selected" : ""}>${n} 个语种并行${n === 5 ? "（默认推荐）" : ""}</option>`,
+      )
+      .join("");
 
     container.innerHTML = `
       <aside class="setup-rail" aria-label="多语种批量断行配置">
@@ -65,7 +76,7 @@ export function renderLineBreakPanel(
             <h2 class="section-heading">批量总表导入（A列名称 · B列链接）</h2>
             ${
               q
-                ? `<button type="button" id="btn-clear-batch-queue" class="seg-option" ${store.busy ? "disabled" : ""}>清空队列</button>`
+                ? `<button type="button" id="btn-clear-batch-queue" class="seg-option" ${isImportingMaster || isBatchActive ? "disabled" : ""}>清空队列</button>`
                 : ""
             }
           </div>
@@ -78,39 +89,45 @@ export function renderLineBreakPanel(
               class="text-input"
               placeholder="粘贴批量总表 Google 表格链接"
               value="${esc(lb.masterSheetUrl)}"
-              ${store.busy ? "disabled" : ""}
+              ${isImportingMaster ? "disabled" : ""}
             />
             <button type="button" id="btn-open-lb-master" class="btn btn-compact" ${!lb.masterSheetUrl.trim() ? "disabled" : ""}>打开</button>
           </div>
 
           <div class="btn-row-equal">
-            <button type="button" id="btn-lb-load-master" class="btn btn-compact" ${store.busy ? "disabled" : ""}>
+            <button type="button" id="btn-lb-load-master" class="btn btn-compact" ${isImportingMaster || isBatchActive ? "disabled" : ""}>
               ${icons.cloudSync}
               <span>读取批量总表</span>
             </button>
-            <label class="btn btn-compact" style="cursor:${store.busy ? "not-allowed" : "pointer"}">
+            <label class="btn btn-compact" style="cursor:${isImportingMaster || isBatchActive ? "not-allowed" : "pointer"}">
               ${icons.upload}
               <span>导入总表 .xlsx</span>
-              <input id="inp-lb-master-file" type="file" accept=".xlsx" hidden ${store.busy ? "disabled" : ""} />
+              <input id="inp-lb-master-file" type="file" accept=".xlsx" hidden ${isImportingMaster || isBatchActive ? "disabled" : ""} />
             </label>
           </div>
 
           ${
             q
-              ? `<span class="field-hint">当前队列：共 <strong>${totalCount}</strong> 个语种（待核对写入 ${readyCount}，已写入 ${completedCount}${pausedCount > 0 ? `，断点待续跑 ${pausedCount}` : ""}）</span>`
+              ? `<span class="field-hint">当前队列：共 <strong>${totalCount}</strong> 个语种（${runningCount > 0 ? `处理中 ${runningCount}，` : ""}待核对写入 ${readyCount}，已写入 ${completedCount}${pausedCount > 0 ? `，断点待续跑 ${pausedCount}` : ""}）</span>`
               : `<span class="field-hint">支持总表含智能芯片与超链接；若某语种表内有多个 Sheet，将弹窗提醒人工选择。</span>`
           }
         </section>
 
         <section class="rail-section">
           <div class="field-label-row">
-            <h2 class="section-heading">引擎与两步写回确认</h2>
+            <h2 class="section-heading">并发引擎与写回方式</h2>
             <button type="button" id="btn-lb-open-rules" class="seg-option">管理语系/规则</button>
           </div>
           <label class="checkbox-row">
-            <input type="checkbox" id="chk-lb-ai" ${lb.useAi ? "checked" : ""} ${store.busy ? "disabled" : ""} />
+            <input type="checkbox" id="chk-lb-ai" ${lb.useAi ? "checked" : ""} ${isBatchActive ? "disabled" : ""} />
             <span>启用大模型意群精断 + 本地硬规则校验闭环</span>
           </label>
+          <div class="rail-form-row">
+            <label class="rail-row-label" for="sel-lb-concurrency" title="同时并行处理的语种数量">并发线程</label>
+            <select id="sel-lb-concurrency" class="select-input" ${isBatchActive ? "disabled" : ""}>
+              ${concurrencyOpts}
+            </select>
+          </div>
           <div class="field-label-row">
             <span class="field-hint">
               ${keyCount > 0 ? `API 密钥池就绪 (${keyCount} 个密钥)` : "尚未配置 API 密钥（跑前请先添加）"}
@@ -118,27 +135,38 @@ export function renderLineBreakPanel(
             <button type="button" id="btn-lb-cfg-key" class="seg-option">${keyCount > 0 ? "管理密钥" : "去设置密钥"}</button>
           </div>
           <span class="field-hint">
-            第一步仅生成本地断行预览与 <strong>L 列核对备注</strong>（不改云端原表）；人工点击「预览核对」确认无误后，再执行第二步在各语种原表内新建 <code>{原Sheet名}_已断行</code> 并回写总表状态。
+            支持 <strong>先预览核对再写入</strong> 或 <strong>完成一个立即写入</strong>；后台多语种并行时，已完成的语种可直接点「预览核对 / 确认写入」，无需等待全部结束。
           </span>
         </section>
 
         <div class="rail-cta-footer" style="margin-block-start:auto">
           ${
-            store.busy
+            isImportingMaster
               ? `
             <div class="progress-strip" role="status" aria-live="polite">
               <div class="field-label-row">
-                <span class="field-hint">${esc(store.progressText || "正在批量处理...")}</span>
+                <span class="field-hint">${esc(store.progressText || "正在读取总表...")}</span>
                 <span class="field-hint">${store.progressPercent}%</span>
               </div>
               <div class="progress-bar-track">
                 <div class="progress-bar-fill" style="width:${store.progressPercent}%"></div>
               </div>
+            </div>`
+              : isBatchActive
+                ? `
+            <div class="progress-strip" role="status" aria-live="polite">
+              <div class="field-label-row">
+                <span class="field-hint">${esc(lb.batchProgressText || "正在并行处理...")}</span>
+                <span class="field-hint">${lb.batchProgressPercent}%</span>
+              </div>
+              <div class="progress-bar-track">
+                <div class="progress-bar-fill" style="width:${lb.batchProgressPercent}%"></div>
+              </div>
             </div>
             <button type="button" id="btn-pause-linebreak" class="btn btn-block">
               <span>暂停并保存当前断点</span>
             </button>`
-              : `
+                : `
             <button
               type="button"
               id="btn-run-batch-all"
@@ -146,20 +174,31 @@ export function renderLineBreakPanel(
               ${!q && !lb.masterSheetUrl.trim() ? "disabled" : ""}
             >
               ${icons.play}
-              <span>${pausedCount > 0 ? `继续接续处理（断点续跑）` : `开始批量断行预览（不改原表）`}</span>
+              <span>${pausedCount > 0 ? `继续接续处理预览（断点续跑）` : `开始批量断行预览（不改原表）`}</span>
             </button>
-            ${
-              readyCount > 0
-                ? `<button
-                    type="button"
-                    id="btn-write-batch-all"
-                    class="btn btn-block btn-connected"
-                  >
-                    ${icons.cloudSync}
-                    <span>确认写入 Google 表格 (${readyCount} 个语种)</span>
-                  </button>`
-                : ""
-            }`
+            <button
+              type="button"
+              id="btn-run-batch-autowrite"
+              class="btn btn-block btn-connected"
+              ${!q && !lb.masterSheetUrl.trim() ? "disabled" : ""}
+              title="多语种并行断行，每完成一个语种立即写回其原表新建 _已断行 并回写总表状态"
+            >
+              ${icons.cloudSync}
+              <span>${pausedCount > 0 ? `继续接续并自动写入` : `批量断行并自动写入（完成即写）`}</span>
+            </button>`
+          }
+          ${
+            readyCount > 0 && !isImportingMaster
+              ? `<button
+                  type="button"
+                  id="btn-write-batch-all"
+                  class="btn btn-block"
+                  title="将当前已断行完成的语种立即写入 Google 表格（不影响后台正在跑的其他语种）"
+                >
+                  ${icons.cloudSync}
+                  <span>立即写入已就绪表格 (${readyCount} 个语种)</span>
+                </button>`
+              : ""
           }
         </div>
       </aside>
@@ -412,6 +451,7 @@ export function renderLineBreakPanel(
           lbSourceUrl: store.lineBreak.sourceSheetUrl,
           lbOutputUrl: store.lineBreak.outputSheetUrl,
           lbMasterUrl: store.lineBreak.masterSheetUrl,
+          lbBatchConcurrency: store.lineBreak.batchConcurrency,
         }),
       );
     } catch {
@@ -433,11 +473,13 @@ export function renderLineBreakPanel(
   const masterInp = container.querySelector<HTMLInputElement>("#inp-lb-master-url");
   const openMasterBtn = container.querySelector<HTMLButtonElement>("#btn-open-lb-master");
   const runBatchBtn = container.querySelector<HTMLButtonElement>("#btn-run-batch-all");
+  const runBatchAutoBtn = container.querySelector<HTMLButtonElement>("#btn-run-batch-autowrite");
   masterInp?.addEventListener("input", () => {
     const v = masterInp.value.trim();
     store.lineBreak.masterSheetUrl = v;
     if (openMasterBtn) openMasterBtn.disabled = !v;
-    if (runBatchBtn && !store.busy) runBatchBtn.disabled = !lb.batchQueue && !v;
+    if (runBatchBtn && !store.busy && !lb.batchRunning) runBatchBtn.disabled = !lb.batchQueue && !v;
+    if (runBatchAutoBtn && !store.busy && !lb.batchRunning) runBatchAutoBtn.disabled = !lb.batchQueue && !v;
     persistUrlsSilently();
   });
 
@@ -462,8 +504,21 @@ export function renderLineBreakPanel(
   });
 
   container.querySelector("#btn-run-batch-all")?.addEventListener("click", actions.onRunBatchAll);
+  container
+    .querySelector("#btn-run-batch-autowrite")
+    ?.addEventListener("click", actions.onRunBatchAutoWrite);
   container.querySelector("#btn-write-batch-all")?.addEventListener("click", actions.onWriteBatchAll);
   container.querySelector("#btn-pause-linebreak")?.addEventListener("click", actions.onPauseRun);
+
+  container
+    .querySelector<HTMLSelectElement>("#sel-lb-concurrency")
+    ?.addEventListener("change", (e) => {
+      const n = Number((e.currentTarget as HTMLSelectElement).value);
+      if (Number.isFinite(n) && n >= 1 && n <= 10) {
+        store.lineBreak.batchConcurrency = n;
+        notifyStateChanged();
+      }
+    });
 
   const srcInp = container.querySelector<HTMLInputElement>("#inp-lb-source-url");
   const openSrcBtn = container.querySelector<HTMLButtonElement>("#btn-open-lb-source");

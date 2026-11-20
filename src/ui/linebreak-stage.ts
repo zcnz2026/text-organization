@@ -31,6 +31,7 @@ export interface LineBreakStageActions {
   onMergeScreen: (sourceRowIdx: number, screenIdx: number) => void;
   onResumeSingle?: () => void;
   onOpenGeminiSettings?: () => void;
+  onWriteInspectingBatchItem?: (itemId: string) => void;
 }
 
 function matchesFilter(row: ProcessedSubtitleRow, filter: LineBreakRowFilter): boolean {
@@ -95,18 +96,38 @@ function defaultColPixelWidth(excelWidth: number | null, outCol: number, targetC
   return 96;
 }
 
+let lastRenderedStageKey = "";
+
 export function renderLineBreakStage(
   container: HTMLElement,
   actions: LineBreakStageActions,
 ): void {
-  const wasPopoverOpen = Boolean(
-    container.querySelector("#lb-col-vis-popover:popover-open"),
-  );
-
   const lb = store.lineBreak;
   const wb = lb.workbook;
   const activeSheet = wb ? wb.sheets[wb.activeSheetName] : null;
   const run = lb.run;
+
+  // If the user is actively typing inside a subtitle cell while background batch workers fire progress updates,
+  // skip clobbering the DOM so their cursor/typing is never interrupted!
+  const activeEl = document.activeElement as HTMLElement | null;
+  if (
+    activeEl &&
+    container.contains(activeEl) &&
+    activeEl.classList.contains("lb-subtitle-edit") &&
+    lb.batchRunning
+  ) {
+    return;
+  }
+
+  const wasPopoverOpen = Boolean(
+    container.querySelector("#lb-col-vis-popover:popover-open"),
+  );
+  const currentStageKey = `${wb?.fileName ?? ""}::${wb?.activeSheetName ?? ""}::${lb.filter}::${lb.batchInspectingItemId ?? ""}`;
+  const prevWrap = container.querySelector<HTMLElement>(".table-wrapper");
+  const shouldRestoreScroll = Boolean(prevWrap) && currentStageKey === lastRenderedStageKey;
+  const prevScrollTop = shouldRestoreScroll ? (prevWrap?.scrollTop ?? 0) : 0;
+  const prevScrollLeft = shouldRestoreScroll ? (prevWrap?.scrollLeft ?? 0) : 0;
+  lastRenderedStageKey = currentStageKey;
 
   const noticeHtml = store.notice
     ? `
@@ -273,6 +294,7 @@ export function renderLineBreakStage(
   const q = lb.searchQuery.trim().toLowerCase();
   const bodyTrs: string[] = [];
   let currentExcelRow = headerRows.length + 1;
+  let splitGroupCounter = 0;
 
   for (const srcRow of allRows) {
     const proc = run?.results[srcRow.rowIndex];
@@ -289,6 +311,12 @@ export function renderLineBreakStage(
 
     const targetBold = Boolean(srcRow.cellBold[colMap.targetCol]);
     const targetFontHex = srcRow.cellFontRgb?.[colMap.targetCol] ?? null;
+    const isMultiScreenRow = !srcRow.isGreenHighlight && screens.length > 1;
+    const isManualRow = Boolean(proc?.manuallyEdited);
+    const isLatestManualRow = isManualRow && lb.lastManualRowIndex === srcRow.rowIndex;
+    const splitGroupParity = isMultiScreenRow
+      ? ((++splitGroupCounter) % 2 === 1 ? "a" : "b")
+      : null;
 
     screens.forEach((sc, sIdx) => {
       const displayRowNum = currentExcelRow;
@@ -297,7 +325,8 @@ export function renderLineBreakStage(
       if (!rowVisibleByFilter || !matchesSearch) return;
 
       const isSplitInserted = sIdx > 0;
-      const isMultiScreenGroup = !srcRow.isGreenHighlight && screens.length > 1;
+      const isSplitEnd = isMultiScreenRow && sIdx === screens.length - 1;
+      const isMultiScreenGroup = isMultiScreenRow;
       const subText = sc.text;
       const fDisplays = formulaCols
         ? evalFormulaDisplay(subText, spec.singleMax, spec.doubleMax)
@@ -340,8 +369,9 @@ export function renderLineBreakStage(
             : "";
 
           const fillCls = fillHex ? "gs-has-fill" : "";
+          const manualCellCls = isManualRow ? "gs-cell-manual-edited" : "";
           return `
-            <td data-col="${colLet}" class="gs-cell gs-target-td ${stickyFirstCls} ${fillCls}" style="${styles.join(";")}" ${isRtl ? 'dir="rtl"' : ""}>
+            <td data-col="${colLet}" class="gs-cell gs-target-td ${stickyFirstCls} ${fillCls} ${manualCellCls}" style="${styles.join(";")}" ${isRtl ? 'dir="rtl"' : ""}>
               <div
                 class="editable-cell cell-pre lb-subtitle-edit"
                 contenteditable="${run ? "true" : "false"}"
@@ -383,17 +413,39 @@ export function renderLineBreakStage(
 
         const centerCls = isCenteredSrcCol(srcCol) ? "gs-cell-center" : "";
         const fillCls = fillHex ? "gs-has-fill" : "";
+
+        // Enhanced Frozen Col A (Line) visual hierarchy for multi-screen split groups & manual edit tag
+        if (visIdx === 0 && (isMultiScreenGroup || isManualRow)) {
+          const manualTagHtml =
+            isManualRow && !isSplitInserted
+              ? `<span class="lb-manual-badge" title="人工手动调整过断行或分屏">人工</span>`
+              : "";
+          if (isMultiScreenGroup) {
+            const innerHtml = !isSplitInserted
+              ? `<div class="lb-line-group-head"><span class="lb-line-num">${esc(displayVal || `#${srcRow.rowIndex + 1}`)}</span><span class="lb-screen-pill">屏1/${screens.length}</span>${manualTagHtml}</div>`
+              : `<div class="lb-line-group-child"><span class="lb-tree-branch">${isSplitEnd ? "└" : "├"}</span><span class="lb-screen-pill lb-screen-pill-cont">屏${sIdx + 1}/${screens.length}</span></div>`;
+            return `<td data-col="${colLet}" class="gs-cell ${stickyFirstCls} ${centerCls} ${fillCls}" style="${styles.join(";")}">${innerHtml}</td>`;
+          }
+          return `<td data-col="${colLet}" class="gs-cell ${stickyFirstCls} ${centerCls} ${fillCls}" style="${styles.join(";")}"><div class="lb-line-group-head"><span class="lb-line-num">${esc(displayVal)}</span>${manualTagHtml}</div></td>`;
+        }
+
         return `<td data-col="${colLet}" class="gs-cell ${stickyFirstCls} ${centerCls} ${fillCls}" style="${styles.join(";")}"><div class="cell-pre">${esc(displayVal)}</div></td>`;
       });
 
-      const splitRowCls = isMultiScreenGroup
-        ? isSplitInserted
-          ? "gs-split-row gs-split-cont"
-          : "gs-split-row gs-split-first"
-        : "";
+      const rowClasses: string[] = [];
+      if (isMultiScreenGroup && splitGroupParity) {
+        rowClasses.push("gs-split-row", `gs-split-group-${splitGroupParity}`);
+        rowClasses.push(isSplitInserted ? "gs-split-cont" : "gs-split-first");
+        if (!isSplitInserted) rowClasses.push("gs-split-start");
+        if (isSplitEnd) rowClasses.push("gs-split-end");
+      }
+      if (isManualRow) {
+        rowClasses.push("gs-row-manual");
+        if (isLatestManualRow) rowClasses.push("gs-row-manual-latest");
+      }
 
       bodyTrs.push(`
-        <tr class="${splitRowCls}">
+        <tr class="${rowClasses.join(" ")}" data-row-src="${srcRow.rowIndex}" data-row-sc="${sIdx}">
           <th scope="row" class="gs-row-num">${displayRowNum}</th>
           ${cellsHtml.join("")}
         </tr>
@@ -443,8 +495,19 @@ export function renderLineBreakStage(
         </div>`
       : "";
 
+  const inspectingBatchItem = lb.batchInspectingItemId
+    ? lb.batchQueue?.items.find((it) => it.id === lb.batchInspectingItemId)
+    : undefined;
+  const manualCount = run ? run.results.filter((r) => r.manuallyEdited).length : 0;
+
   const backToBatchBtn = lb.batchInspectingItemId
-    ? `<button type="button" id="btn-back-to-batch-queue" class="btn btn-compact" style="margin-inline-end:0.4rem">← 返回批量列表</button>`
+    ? `<button type="button" id="btn-back-to-batch-queue" class="btn btn-compact" style="margin-inline-end:0.3rem">← 返回批量列表</button>${
+        inspectingBatchItem && inspectingBatchItem.status === "ready_review"
+          ? `<button type="button" id="btn-write-inspecting-batch" class="btn btn-compact btn-connected" style="margin-inline-end:0.35rem" title="确认无误，立即写回该原表新建 _已断行（不影响其他后台任务）">${icons.cloudSync}<span>确认写入此表</span></button>`
+          : inspectingBatchItem?.status === "writing"
+            ? `<span class="settings-status-pill pill-info" style="margin-inline-end:0.35rem">写入中...</span>`
+            : ""
+      }`
     : "";
 
   container.innerHTML = `
@@ -467,6 +530,7 @@ export function renderLineBreakStage(
                 <span class="col-chip">总行 ${headerRows.length + run.totalOutputScreens}</span>
                 <span class="col-chip">同屏 @ ${run.sameScreenAtCount}</span>
                 <span class="col-chip">分屏插行 +${run.insertedScreenRowsCount}</span>
+                ${manualCount > 0 ? `<span class="col-chip col-chip-manual">人工微调 ${manualCount}</span>` : ""}
               </div>`
             : ""
         }
@@ -570,6 +634,15 @@ export function renderLineBreakStage(
       </div>
     </main>
   `;
+
+  // Restore table scroll position synchronously so clicking +分屏 / ↑合屏 or editing @ never jumps to top!
+  if (shouldRestoreScroll) {
+    const nextWrap = container.querySelector<HTMLElement>(".table-wrapper");
+    if (nextWrap) {
+      nextWrap.scrollTop = prevScrollTop;
+      nextWrap.scrollLeft = prevScrollLeft;
+    }
+  }
 
   // Position Popover cleanly anchored to trigger button (explicit anchor + source + rect safety net)
   const popBtn = container.querySelector<HTMLButtonElement>("#btn-lb-col-popover");
@@ -733,6 +806,11 @@ export function renderLineBreakStage(
   container.querySelector("#btn-back-to-batch-queue")?.addEventListener("click", () => {
     store.lineBreak.batchInspectingItemId = null;
     notifyStateChanged();
+  });
+
+  container.querySelector("#btn-write-inspecting-batch")?.addEventListener("click", () => {
+    const id = store.lineBreak.batchInspectingItemId;
+    if (id) actions.onWriteInspectingBatchItem?.(id);
   });
 
   container.querySelector("#btn-single-open-keys")?.addEventListener("click", () => {

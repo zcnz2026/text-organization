@@ -428,6 +428,8 @@ export function updateLineBreakScreenText(
           .trim();
 
   rowRes.screens[screenIndex] = measurer.analyzeScreen(cleaned);
+  rowRes.manuallyEdited = true;
+  store.lineBreak.lastManualRowIndex = sourceRowIndex;
 
   if (rowRes.status !== "skip_green" && rowRes.category !== "citation_same_screen") {
     const hasWarn = rowRes.screens.some((s) => s.exceedsSingleLimit || s.ratioOutOfBounds);
@@ -490,6 +492,8 @@ export function splitScreenBelowManual(sourceRowIndex: number, screenIndex: numb
     measurer.analyzeScreen(secondText),
   );
   rowRes.status = "split_multi_screen";
+  rowRes.manuallyEdited = true;
+  store.lineBreak.lastManualRowIndex = sourceRowIndex;
   rowRes.reason = `人工分屏 · 共 ${rowRes.screens.length} 屏`;
   rowRes.reviewNote = "";
   store.lineBreak.run = summarizeRun(run.sheetName, run.langSpec, run.results);
@@ -510,6 +514,8 @@ export function mergeScreenWithPreviousManual(sourceRowIndex: number, screenInde
 
   rowRes.screens.splice(screenIndex - 1, 2, measurer.analyzeScreen(combined));
   rowRes.status = rowRes.screens.length > 1 ? "split_multi_screen" : "broken_same_screen";
+  rowRes.manuallyEdited = true;
+  store.lineBreak.lastManualRowIndex = sourceRowIndex;
   rowRes.reason = "人工合并分屏";
   rowRes.reviewNote = "";
   store.lineBreak.run = summarizeRun(run.sheetName, run.langSpec, run.results);

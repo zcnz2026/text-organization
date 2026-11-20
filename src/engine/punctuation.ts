@@ -304,10 +304,11 @@ export function formatStandaloneTitle(
   const srcZh = (sourceChinese || "").trim();
   const { open: dOpen, close: dClose } = resolveOuterQuotes(rule, false);
 
-  const wantsComma = srcZh.endsWith("，") || srcEn.endsWith(',"') || srcEn.endsWith(",");
-  const wantsPeriod =
-    !wantsComma &&
-    (srcZh.endsWith("。") || srcEn.endsWith('."') || srcEn.endsWith("."));
+  // Prefer English trailing punctuation when English draft is present (e.g. ZH ends with ， while EN ends with .")
+  const enComma = srcEn.endsWith(',"') || srcEn.endsWith(",”") || srcEn.endsWith(",");
+  const enPeriod = srcEn.endsWith('."') || srcEn.endsWith(".”") || srcEn.endsWith(".");
+  const wantsComma = srcEn ? enComma : srcZh.endsWith("，");
+  const wantsPeriod = !wantsComma && (srcEn ? enPeriod : srcZh.endsWith("。"));
 
   if (wantsComma) {
     return `${dOpen}${applyEndingPattern(core, ",", dClose, rule, false)}`;

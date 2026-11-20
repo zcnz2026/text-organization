@@ -6,6 +6,7 @@ import {
 } from "../src/linebreak/ai-breaker";
 import {
   loadBatchMasterQueueFromGoogleUrl,
+  runWithConcurrency,
   writeStatusBackToBatchMasterSheet,
 } from "../src/linebreak/batch-master";
 import {
@@ -811,5 +812,37 @@ describe("Subtitle Line-Break Engine, Exact Template & Google Sheet IO", () => {
     } finally {
       resetAllLineBreakCustomizations();
     }
+  });
+
+  it("runs batch tasks concurrently with bounded pool (default 5 workers) and respects early stop", async () => {
+    const items = Array.from({ length: 12 }, (_, i) => i);
+    let inFlight = 0;
+    let peakInFlight = 0;
+    const processed: number[] = [];
+
+    await runWithConcurrency(items, 5, async (n) => {
+      inFlight += 1;
+      if (inFlight > peakInFlight) peakInFlight = inFlight;
+      await new Promise((r) => setTimeout(r, 12));
+      processed.push(n);
+      inFlight -= 1;
+    });
+
+    expect(peakInFlight).toBe(5);
+    expect(processed.sort((a, b) => a - b)).toEqual(items);
+
+    let stopFlag = false;
+    const stoppedProcessed: number[] = [];
+    await runWithConcurrency(
+      items,
+      3,
+      async (n) => {
+        stoppedProcessed.push(n);
+        if (n === 1) stopFlag = true;
+        await new Promise((r) => setTimeout(r, 5));
+      },
+      () => stopFlag,
+    );
+    expect(stoppedProcessed.length).toBeLessThan(items.length);
   });
 });

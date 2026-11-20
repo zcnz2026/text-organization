@@ -11,6 +11,89 @@ import type {
 import type { CitationVariant, ScriptRow } from "../types/domain";
 import { stripOuterDoubleQuotes } from "./punctuation";
 
+export interface TruncationSpec {
+  hasTruncation: boolean;
+  fullEnSentence: string;
+  deletedEnPrefix: string;
+}
+
+export function parseTruncationSpec(row: ScriptRow): TruncationSpec {
+  const combinedMeta = `${row.remark || ""}\n${row.note || ""}`;
+  if (!combinedMeta.includes("截取")) {
+    return { hasTruncation: false, fullEnSentence: "", deletedEnPrefix: "" };
+  }
+  const m = /截取[：:\s]*([^\r\n]+)/u.exec(combinedMeta);
+  const fullEnSentence = m ? m[1].trim() : "";
+
+  // 1. Prefer explicit strikethrough runs from Google Sheets cell formatting if present
+  if (row.strikethroughTexts && row.strikethroughTexts.length > 0) {
+    return {
+      hasTruncation: true,
+      fullEnSentence,
+      deletedEnPrefix: row.strikethroughTexts.join(" ").trim(),
+    };
+  }
+
+  // 2. Otherwise compute deleted prefix by diffing fullEnSentence against row.english
+  const keptClean = stripOuterDoubleQuotes(row.english || "")
+    .replace(/^(?:……|\.\.\.|…)\s*/u, "")
+    .trim();
+  if (fullEnSentence && keptClean.length >= 6) {
+    const lowFull = fullEnSentence.toLowerCase();
+    const probe = keptClean.slice(0, Math.min(28, keptClean.length)).toLowerCase();
+    const pos = lowFull.indexOf(probe);
+    if (pos > 0) {
+      return {
+        hasTruncation: true,
+        fullEnSentence,
+        deletedEnPrefix: fullEnSentence.slice(0, pos).trim(),
+      };
+    }
+  }
+
+  return { hasTruncation: true, fullEnSentence, deletedEnPrefix: "" };
+}
+
+/**
+ * Extracts ONLY the complete un-truncated target sentence corresponding to the truncated row
+ * PLUS the immediately following 1 sentence (merged), instead of dumping the whole paragraph!
+ */
+export function extractTruncatedSentencePair(
+  fullTargetParagraph: string,
+  fullEnParagraph: string,
+  row: ScriptRow,
+): string {
+  const targetClean = (fullTargetParagraph || "").replace(/\s+/g, " ").trim();
+  if (!targetClean) return "";
+  const targetSentences = targetClean
+    .split(/(?<=[.!?。！？।។။])\s+/u)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (targetSentences.length <= 2) return targetSentences.join(" ");
+
+  const spec = parseTruncationSpec(row);
+  const enClean = (fullEnParagraph || "").replace(/\s+/g, " ").trim();
+  const enSentences = enClean
+    .split(/(?<=[.!?])\s+/u)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  let targetIdx = 0;
+  const searchEn = normMatchKey(spec.fullEnSentence || row.english).slice(0, 28);
+  if (searchEn.length >= 6 && enSentences.length > 0) {
+    const enIdx = enSentences.findIndex((s) => normMatchKey(s).includes(searchEn));
+    if (enIdx >= 0) {
+      targetIdx = Math.min(
+        targetSentences.length - 1,
+        Math.round((enIdx / Math.max(1, enSentences.length - 1)) * (targetSentences.length - 1)),
+      );
+    }
+  }
+
+  const pair = targetSentences.slice(targetIdx, Math.min(targetSentences.length, targetIdx + 2));
+  return pair.join(" ");
+}
+
 export function normMatchKey(s: string): string {
   return (s || "")
     .normalize("NFKC")
@@ -259,13 +342,39 @@ function splitBibleTargetAndRef(raw: string): { body: string; ref: string } {
   return { body: trimmed.slice(0, m.index).trim(), ref: m[1].trim() };
 }
 
-function mergeBibleRangeRef(firstRef: string, lastRef: string): string {
-  if (!firstRef || !lastRef || firstRef === lastRef) return firstRef || lastRef;
-  const endVerse = /(\d+)\s*$/.exec(lastRef)?.[1];
-  if (endVerse && !firstRef.endsWith(`–${endVerse}`) && !firstRef.endsWith(`-${endVerse}`)) {
-    return `${firstRef}–${endVerse}`;
+function mergeBibleRangeRef(
+  firstRef: string,
+  lastRef: string,
+  startVerseNum?: number,
+  endVerseNum?: number,
+): string {
+  if (firstRef && lastRef && firstRef !== lastRef) {
+    const endVerse = /(\d+)\s*$/.exec(lastRef)?.[1];
+    if (endVerse && !firstRef.endsWith(`–${endVerse}`) && !firstRef.endsWith(`-${endVerse}`)) {
+      return `${firstRef}–${endVerse}`;
+    }
+    return firstRef;
   }
-  return firstRef;
+  const single = firstRef || lastRef;
+  if (single && startVerseNum && endVerseNum && endVerseNum > startVerseNum) {
+    // e.g. parts[0].ref was "" and parts[last].ref was "Roma 7:17" -> upgrade to "Roma 7:15–17"
+    if (new RegExp(`[:.,]\\s*${endVerseNum}\\s*$`).test(single)) {
+      return single.replace(new RegExp(`([:.,]\\s*)${endVerseNum}\\s*$`), `$1${startVerseNum}–${endVerseNum}`);
+    }
+    if (new RegExp(`[:.,]\\s*${startVerseNum}\\s*$`).test(single)) {
+      return `${single}–${endVerseNum}`;
+    }
+  }
+  return single;
+}
+
+function extractChapVerseNums(ref: string): { chap: number; startV: number; endV: number } | null {
+  const m = /(\d+)\s*[:：.]\s*(\d+)(?:\s*[-–—]\s*(\d+))?/.exec(ref || "");
+  if (!m) return null;
+  const chap = Number.parseInt(m[1], 10);
+  const startV = Number.parseInt(m[2], 10);
+  const endV = m[3] ? Number.parseInt(m[3], 10) : startV;
+  return { chap, startV, endV };
 }
 
 export function findBibleVerse(
@@ -276,56 +385,102 @@ export function findBibleVerse(
   if (entries.length === 0 || verseRows.length === 0) return null;
 
   const keyRef = normBibleRef(refHint);
-  const firstEn = normMatchKey(verseRows[0]?.english ?? "").slice(0, 24);
+  const cv = extractChapVerseNums(refHint);
+  const truncSpec0 = parseTruncationSpec(verseRows[0]);
+  const firstEn = normMatchKey(truncSpec0.fullEnSentence || verseRows[0]?.english || "").slice(0, 28);
   const firstZh = normMatchKey(verseRows[0]?.chinese ?? "").slice(0, 14);
-  const lastEn = normMatchKey(verseRows[verseRows.length - 1]?.english ?? "").slice(-24);
+  const lastEn = normMatchKey(verseRows[verseRows.length - 1]?.english ?? "").slice(-28);
   const lastZh = normMatchKey(verseRows[verseRows.length - 1]?.chinese ?? "").slice(-14);
+  const allRowProbes = verseRows.map((r) => ({
+    zh: normMatchKey(r.chinese).slice(0, 12),
+    en: normMatchKey(r.english).slice(0, 22),
+  }));
 
   let startIdx = -1;
   if (keyRef) startIdx = entries.findIndex((e) => normBibleRef(e.chapterRef) === keyRef);
 
-  // Range lookup (e.g. "romans 7:15-16" -> match consecutive "romans 7:15" + "romans 7:16")
-  if (startIdx < 0 && keyRef) {
-    const rangeMatch = /^(.+?\d+):(\d+)-(\d+)$/.exec(keyRef);
-    if (rangeMatch) {
-      const [, bookChap, startV, endV] = rangeMatch;
-      const sV = Number.parseInt(startV, 10);
-      const eV = Number.parseInt(endV, 10);
-      const idx = entries.findIndex((e) => normBibleRef(e.chapterRef) === `${bookChap}:${sV}`);
-      if (idx >= 0 && eV > sV && eV - sV <= 6) {
-        const collected: BibleEntry[] = [];
-        for (let v = sV; v <= eV; v += 1) {
-          const hit = entries.find((e) => normBibleRef(e.chapterRef) === `${bookChap}:${v}`);
-          if (hit) collected.push(hit);
+  // Range lookup (e.g. "luke 17:24-25" or "romans 7:15-17" even if library uses localized book name like "Lukas 17:24" or "Roma 7:15")
+  if (startIdx < 0 && cv && cv.endV > cv.startV && cv.endV - cv.startV <= 8) {
+    const bookChapMatch = /^(.+?\d+):(\d+)-(\d+)$/.exec(keyRef);
+    let candStart = -1;
+    if (bookChapMatch) {
+      candStart = entries.findIndex((e) => normBibleRef(e.chapterRef) === `${bookChapMatch[1]}:${cv.startV}`);
+    }
+    if (candStart < 0) {
+      // Match by exact chapter:startV numbers + text confirmation (avoids localized book name mismatch!)
+      candStart = entries.findIndex((e) => {
+        const eCv = extractChapVerseNums(e.chapterRef || e.targetText);
+        if (!eCv || eCv.chap !== cv.chap || eCv.startV !== cv.startV) return false;
+        const ez = normMatchKey(e.chinese);
+        const ee = normMatchKey(e.english);
+        return (firstZh.length >= 4 && ez.includes(firstZh)) || (firstEn.length >= 8 && ee.includes(firstEn));
+      });
+    }
+    if (candStart >= 0) {
+      const collected: BibleEntry[] = [entries[candStart]];
+      for (let j = candStart + 1; j < Math.min(entries.length, candStart + (cv.endV - cv.startV) + 2); j += 1) {
+        const eCv = extractChapVerseNums(entries[j].chapterRef || entries[j].targetText);
+        if (eCv && eCv.chap === cv.chap && eCv.startV > cv.startV && eCv.startV <= cv.endV) {
+          collected.push(entries[j]);
         }
-        if (collected.length >= 2) {
-          const parts = collected.map((c) => splitBibleTargetAndRef(c.targetText));
-          const mergedBody = parts.map((p) => stripOuterDoubleQuotes(p.body)).join(" ");
-          const mergedRef = mergeBibleRangeRef(parts[0].ref, parts[parts.length - 1].ref) || refHint.replace(/^[（(]|[)）.]$/g, "");
-          const trunc = verseRows[0]?.remark.includes("涉及截取") || verseRows[0]?.english.includes("…") || verseRows[0]?.english.includes("...");
-          const mergedSource = [...new Set(collected.map((c) => (c.source || "").trim()).filter(Boolean))].join(" / ");
-          return {
-            text: mergedBody,
-            targetCitationRef: `(${mergedRef})`,
-            truncatedStart: Boolean(trunc),
-            ...(mergedSource ? { source: mergedSource } : {}),
-          };
-        }
+      }
+      if (collected.length >= 2) {
+        const parts = collected.map((c) => splitBibleTargetAndRef(c.targetText));
+        const mergedBody = parts.map((p) => stripOuterDoubleQuotes(p.body)).join(" ");
+        const mergedRef =
+          mergeBibleRangeRef(parts[0].ref, parts[parts.length - 1].ref, cv.startV, cv.endV) ||
+          refHint.replace(/^[（(]|[)）.,，。]+$/g, "");
+        const trunc =
+          truncSpec0.hasTruncation ||
+          verseRows[0]?.english.trim().startsWith("…") ||
+          verseRows[0]?.english.trim().startsWith('"...') ||
+          verseRows[0]?.english.trim().startsWith('"…');
+        const mergedSource = [...new Set(collected.map((c) => (c.source || "").trim()).filter(Boolean))].join(" / ");
+        return {
+          text: mergedBody,
+          targetCitationRef: `(${mergedRef})`,
+          truncatedStart: Boolean(trunc),
+          ...(mergedSource ? { source: mergedSource } : {}),
+        };
       }
     }
   }
 
-  // Fallback: match by English or Chinese text of first verse row
+  // Fallback: score all entries by chapter:verse numbers + ALL verse rows (prevents "For as the lightning" matching Matt 24:27 instead of Luke 17:24!)
   if (startIdx < 0) {
-    startIdx = entries.findIndex(
-      (e) =>
-        (firstEn.length >= 8 && normMatchKey(e.english).includes(firstEn)) ||
-        (firstZh.length >= 5 && normMatchKey(e.chinese).includes(firstZh)),
-    );
+    let bestScore = 0;
+    for (let i = 0; i < entries.length; i += 1) {
+      const e = entries[i];
+      const ez = normMatchKey(e.chinese);
+      const ee = normMatchKey(e.english);
+      let score = 0;
+      if (firstEn.length >= 8 && ee.includes(firstEn)) score += 4;
+      if (firstZh.length >= 5 && ez.includes(firstZh)) score += 5;
+      if (score === 0) continue;
+
+      const eCv = extractChapVerseNums(e.chapterRef || e.targetText);
+      if (cv && eCv && eCv.chap === cv.chap && eCv.startV === cv.startV) {
+        score += 15;
+      }
+      // Check how many subsequent script rows match i .. i+3
+      const windowZh = normMatchKey(entries.slice(i, i + 4).map((x) => x.chinese).join(""));
+      const windowEn = normMatchKey(entries.slice(i, i + 4).map((x) => x.english).join(""));
+      for (const pr of allRowProbes) {
+        if (pr.zh.length >= 4 && windowZh.includes(pr.zh)) score += 3;
+        if (pr.en.length >= 8 && windowEn.includes(pr.en)) score += 3;
+      }
+      if (lastZh.length >= 5 && windowZh.includes(lastZh)) score += 5;
+      if (lastEn.length >= 8 && windowEn.includes(lastEn)) score += 5;
+
+      if (score > bestScore) {
+        bestScore = score;
+        startIdx = i;
+      }
+    }
   }
   if (startIdx < 0) return null;
 
-  // If the script spans multiple consecutive verses stored as separate rows in the library (e.g. Rom 7:15 + 7:16), auto-extend
+  // If the script spans multiple consecutive verses stored as separate rows in the library, auto-extend
   let endIdx = startIdx;
   const startEntry = entries[startIdx];
   const hasLastInStart =
@@ -349,15 +504,16 @@ export function findBibleVerse(
   const bodyOnly = slice.length > 1 ? parts.map((p) => stripOuterDoubleQuotes(p.body)).join(" ") : parts[0].body;
   const mergedRef =
     slice.length > 1
-      ? mergeBibleRangeRef(parts[0].ref, parts[parts.length - 1].ref)
-      : parts[0].ref;
+      ? mergeBibleRangeRef(parts[0].ref, parts[parts.length - 1].ref, cv?.startV, cv?.endV)
+      : mergeBibleRangeRef(parts[0].ref, parts[0].ref, cv?.startV, cv?.endV);
   const targetCitationRef = mergedRef
     ? `(${mergedRef})`
-    : `(${startEntry.chapterRef || refHint.replace(/^[（(]|[)）.]$/g, "")})`;
+    : `(${startEntry.chapterRef || refHint.replace(/^[（(]|[)）.,，。]+$/g, "")})`;
   const trunc =
-    verseRows[0]?.remark.includes("涉及截取") ||
-    verseRows[0]?.english.includes("…") ||
-    verseRows[0]?.english.includes("...");
+    truncSpec0.hasTruncation ||
+    verseRows[0]?.english.trim().startsWith("…") ||
+    verseRows[0]?.english.trim().startsWith('"...') ||
+    verseRows[0]?.english.trim().startsWith('"…');
   const mergedSource = [...new Set(slice.map((c) => (c.source || "").trim()).filter(Boolean))].join(" / ");
   return {
     text: bodyOnly,
@@ -459,6 +615,48 @@ export function aggregateHymnSublinesForBlock(
   return out;
 }
 
+/**
+ * If the English draft line does NOT repeat its clause twice, collapse an exact doubled
+ * target LRC clause (e.g. "Firman Tuhan adalah kebenaran. Firman Tuhan adalah kebenaran."
+ * or "watak rusakku ditahirkan, watak rusakku ditahirkan.") down to a single clause.
+ */
+export function dedupeRepeatedLyricClause(targetLine: string, sourceEnglish: string): string {
+  const t = targetLine.trim();
+  const enClean = stripOuterDoubleQuotes(sourceEnglish || "").trim();
+  if (!t || !enClean) return t;
+  // Check if English itself is repeated
+  const enHalf = /^(.{6,}?)[,.;!?\s]+\1[.!?"”']*$/i.test(enClean);
+  if (enHalf) return t;
+
+  const m = /^(.{6,}?)([,.!?;]+\s+)\1([.!?"”»]*)$/iu.exec(t);
+  if (m) {
+    const endPunct = m[3] || (m[2].trim().startsWith(".") ? "." : ".");
+    return `${m[1].trim()}${endPunct}`;
+  }
+  return t;
+}
+
+export function resolveComboHymnTitle(
+  catalog: LanguageCatalog,
+  row: ScriptRow,
+  rawTargetTitle: string,
+): { text: string; fullyComposed: boolean } {
+  const cleanTitle = stripOuterDoubleQuotes(rawTargetTitle).trim();
+  // Look up prefix phrase dynamically from cloud commonFixedTerms (by English prefix before ':' or Chinese prefix before '《')
+  const enPrefix = row.english.includes(":") ? row.english.split(":")[0].trim().toLowerCase() : "";
+  const zhPrefix = row.chinese.includes("《") ? row.chinese.split("《")[0].trim().toLowerCase() : "";
+  const prefixTarget =
+    (enPrefix && (catalog.commonFixedTerms.get(enPrefix) || catalog.commonFixedTerms.get(`${enPrefix}:`))) ||
+    (zhPrefix && catalog.commonFixedTerms.get(zhPrefix)) ||
+    "";
+  if (prefixTarget && cleanTitle) {
+    const cleanPrefix = prefixTarget.replace(/[:：]\s*$/u, "").trim();
+    const quotedTitle = `${catalog.rule.doubleOpen}${cleanTitle}${catalog.rule.doubleClose}`;
+    return { text: `${cleanPrefix}: ${quotedTitle}`, fullyComposed: true };
+  }
+  return { text: cleanTitle, fullyComposed: false };
+}
+
 export function resolveCitationText(
   catalog: LanguageCatalog,
   row: ScriptRow,
@@ -483,16 +681,36 @@ export function resolveCitationText(
 
   const hymn = findHymnMatch(catalog.hymns, row.chinese || row.filterCategory);
   if (hymn?.targetCitation) return hymn.targetCitation;
-  if (hymn?.targetTitle && row.chinese.includes("跟随羔羊唱新歌")) {
-    const bookPair = catalog.citations.find(
-      (p) => p.keyZh.includes("跟随羔羊唱新歌") && !p.keyZh.includes("・") && !p.keyZh.includes("·"),
-    );
-    const bookStem = bookPair ? pickFromPair(bookPair) : "";
-    if (bookStem) {
-      if (bookStem.endsWith(catalog.rule.doubleClose)) {
-        return `${bookStem.slice(0, -catalog.rule.doubleClose.length)}. ${hymn.targetTitle}${catalog.rule.doubleClose}`;
+  if (hymn?.targetTitle && (row.chinese.includes("・") || row.chinese.includes("·"))) {
+    const cleanTitle = stripOuterDoubleQuotes(hymn.targetTitle).trim();
+    const zhCollectionStem = row.chinese.replace(/^[《（(\s]+/, "").split(/[・·]/)[0].trim();
+    if (zhCollectionStem) {
+      // 1. Exact collection stem entry in citations or commonFixedTerms
+      const bookPair = catalog.citations.find(
+        (p) => p.keyZh.includes(zhCollectionStem) && !p.keyZh.includes("・") && !p.keyZh.includes("·"),
+      );
+      const bookStem =
+        (bookPair ? pickFromPair(bookPair) : "") ||
+        catalog.commonFixedTerms.get(zhCollectionStem.toLowerCase()) ||
+        "";
+      if (bookStem) {
+        if (bookStem.endsWith(catalog.rule.doubleClose)) {
+          return `${bookStem.slice(0, -catalog.rule.doubleClose.length)}, ${cleanTitle}${catalog.rule.doubleClose}`;
+        }
+        return `${bookStem}, ${cleanTitle}`;
       }
-      return `${bookStem}, ${hymn.targetTitle}`;
+      // 2. Derive collection template dynamically from any sibling song citation in the same collection!
+      const siblingPair = catalog.citations.find(
+        (p) => p.keyZh.includes(zhCollectionStem) && (p.keyZh.includes("・") || p.keyZh.includes("·")),
+      );
+      if (siblingPair) {
+        const sibTarget = pickFromPair(siblingPair);
+        // Replace the trailing song title after the last comma / middle-dot while preserving quotes/brackets
+        const commaMatch = /^(.+?[,，ㆍ·]\s*)(["“«„'‘<＜]?)([^"”»“'’>＞)）]+)(["”»“'’>＞)）]*.*)$/u.exec(sibTarget);
+        if (commaMatch) {
+          return `${commaMatch[1]}${commaMatch[2]}${cleanTitle}${commaMatch[4]}`;
+        }
+      }
     }
   }
 
@@ -565,9 +783,21 @@ export function lookupPhraseForNoteXx(
   }
 
   for (const a of catalog.articles) {
-    const aEnClean = normMatchKey(a.enTitle.replace(/volume\s*\d+/i, ""));
+    const aEnClean = normMatchKey(a.enTitle.replace(/(?:volume|vol\.?|jilid|том|tom)\s*\d+/gi, ""));
     if ((normMatchKey(a.enTitle) === key || aEnClean === key) && a.targetTitle) {
-      return { value: a.targetTitle.replace(/\s*(ТОМ|TOM|VOL\.?)\s*\d+$/i, "").trim(), fromRoster: false };
+      return {
+        value: a.targetTitle.replace(/[,\s]*(?:ТОМ|TOM|VOL\.?|VOLUME|Jilid)\s*\d+$/i, "").trim(),
+        fromRoster: false,
+      };
+    }
+  }
+  // Fallback: extract book stem "The Word Appears in the Flesh" from catalog citations if present
+  if (key === normMatchKey("The Word Appears in the Flesh")) {
+    for (const c of catalog.citations) {
+      if (c.keyZh.includes("话在肉身显现") || /word appears in the flesh/i.test(c.keyEn)) {
+        const val = (c.subtitleBand || c.videoEffect || "").trim();
+        if (val) return { value: stripOuterDoubleQuotes(val), fromRoster: false };
+      }
     }
   }
 

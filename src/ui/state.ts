@@ -47,6 +47,16 @@ export interface LineBreakUiState {
   batchQueue: BatchMasterQueue | null;
   /** Non-empty when user clicked "预览核对" on a specific batch item while in batch mode */
   batchInspectingItemId: string | null;
+  /** Concurrent workers for batch mode (default 5, range 1..10) */
+  batchConcurrency: number;
+  /** True while background batch line-breaking workers are running (does NOT block preview/write of completed items!) */
+  batchRunning: boolean;
+  /** True when current background batch run is in "完成即写" auto-write mode */
+  batchAutoWriteRunning: boolean;
+  batchProgressPercent: number;
+  batchProgressText: string;
+  /** Source row index most recently manually edited/split/merged, highlighted visually */
+  lastManualRowIndex: number | null;
   singlePausedProgress: {
     done: number;
     total: number;
@@ -283,6 +293,7 @@ function loadUiTabPrefs(): {
   lbSourceUrl: string;
   lbOutputUrl: string;
   lbMasterUrl: string;
+  lbBatchConcurrency: number;
 } {
   try {
     const raw = localStorage.getItem(UI_TAB_STORAGE_KEY);
@@ -295,7 +306,9 @@ function loadUiTabPrefs(): {
         lbSourceUrl?: string;
         lbOutputUrl?: string;
         lbMasterUrl?: string;
+        lbBatchConcurrency?: number;
       };
+      const conc = Number(parsed.lbBatchConcurrency);
       return {
         activeMainTab: parsed.activeMainTab === "linebreak" ? "linebreak" : "extract",
         lbMode: parsed.lbMode === "batch" ? "batch" : "single",
@@ -304,6 +317,7 @@ function loadUiTabPrefs(): {
         lbSourceUrl: parsed.lbSourceUrl ?? "",
         lbOutputUrl: parsed.lbOutputUrl ?? "",
         lbMasterUrl: parsed.lbMasterUrl ?? "",
+        lbBatchConcurrency: Number.isFinite(conc) && conc >= 1 && conc <= 10 ? Math.round(conc) : 5,
       };
     }
   } catch {
@@ -317,6 +331,7 @@ function loadUiTabPrefs(): {
     lbSourceUrl: "",
     lbOutputUrl: "",
     lbMasterUrl: "",
+    lbBatchConcurrency: 5,
   };
 }
 
@@ -372,6 +387,12 @@ export const store: AppState = {
     masterSheetUrl: uiTabPrefs.lbMasterUrl,
     batchQueue: null,
     batchInspectingItemId: null,
+    batchConcurrency: uiTabPrefs.lbBatchConcurrency,
+    batchRunning: false,
+    batchAutoWriteRunning: false,
+    batchProgressPercent: 0,
+    batchProgressText: "",
+    lastManualRowIndex: null,
     singlePausedProgress: null,
     workbook: null,
     langCode: uiTabPrefs.lbLangCode,
@@ -445,6 +466,7 @@ export function notifyStateChanged(): void {
         lbSourceUrl: store.lineBreak.sourceSheetUrl,
         lbOutputUrl: store.lineBreak.outputSheetUrl,
         lbMasterUrl: store.lineBreak.masterSheetUrl,
+        lbBatchConcurrency: store.lineBreak.batchConcurrency,
       }),
     );
   } catch {

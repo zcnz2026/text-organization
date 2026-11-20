@@ -143,6 +143,8 @@ export interface ProcessedSubtitleRow {
   reason: string;
   /** Non-empty only when human review/verification is needed (written to Col L) */
   reviewNote: string;
+  /** True when user manually edited text, split, or merged this row in preview */
+  manuallyEdited?: boolean;
 }
 
 export interface SubtitleLineBreakRun {
@@ -168,6 +170,7 @@ export type BatchItemStatus =
   | "pending_confirm_sheet"
   | "queued"
   | "running"
+  | "writing"
   | "paused_key"
   | "ready_review"
   | "completed"

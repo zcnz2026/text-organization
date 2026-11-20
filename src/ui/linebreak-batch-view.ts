@@ -32,6 +32,8 @@ function renderStatusCell(item: BatchLineBreakItem): string {
       return `<span class="settings-status-pill pill-muted">待断行预览</span>`;
     case "running":
       return `<span class="settings-status-pill pill-info">断行中 ${item.doneAiRows}/${item.totalAiRows || "..."}</span>`;
+    case "writing":
+      return `<span class="settings-status-pill pill-info">写入表格中...</span>`;
     case "paused_key":
       return `<span class="settings-status-pill pill-warn" title="${esc(item.errorMessage ?? "")}">已存断点 (${item.doneAiRows}/${item.totalAiRows})</span>`;
     case "ready_review":
@@ -49,6 +51,10 @@ export function renderLineBreakBatchStage(
   container: HTMLElement,
   actions: LineBreakBatchStageActions,
 ): void {
+  const prevWrap = container.querySelector<HTMLElement>(".table-wrapper");
+  const prevScrollTop = prevWrap?.scrollTop ?? 0;
+  const prevScrollLeft = prevWrap?.scrollLeft ?? 0;
+
   const lb = store.lineBreak;
   const queue = lb.batchQueue;
 
@@ -66,7 +72,7 @@ export function renderLineBreakBatchStage(
         ${noticeHtml}
         <div class="empty-guide">
           <h2>多语种总表批量断行（先核对预览 · 确认后再写入）</h2>
-          <p>按照您的「测试断行」总表格式（<strong>A 列：带语系的表格名称</strong>，<strong>B 列：各语种 Google 表格链接</strong>），安全分两步完成所有语种断行：</p>
+          <p>按照您的批量总表格式（<strong>A 列：带语系的表格名称</strong>，<strong>B 列：各语种 Google 表格链接</strong>），支持多语种并发断行：</p>
           <ol>
             <li><strong>第一步（只读预览，不改云端）</strong>：自动识别各行语种（多 Sheet 自动提醒人工确认），批量生成断行结果与 <code>L</code> 列核对备注；</li>
             <li><strong>第二步（人工抽查核对 → 确认写入）</strong>：点击任意语种的「预览核对」可在右侧原样表中检查微调，确认无误后可<strong>单表确认写入</strong>或<strong>一键全部写入</strong>各自原始表格新建 <code>{原Sheet名}_已断行</code>（同步回写总表 <code>C/D</code> 列状态）；</li>
@@ -75,7 +81,13 @@ export function renderLineBreakBatchStage(
         </div>
       </main>
     `;
-    container.querySelector("#btn-dismiss-batch-notice")?.addEventListener("click", () => {
+    const nextWrap = container.querySelector<HTMLElement>(".table-wrapper");
+  if (nextWrap) {
+    nextWrap.scrollTop = prevScrollTop;
+    nextWrap.scrollLeft = prevScrollLeft;
+  }
+
+  container.querySelector("#btn-dismiss-batch-notice")?.addEventListener("click", () => {
       store.notice = null;
       notifyStateChanged();
     });
@@ -83,6 +95,7 @@ export function renderLineBreakBatchStage(
   }
 
   const totalCount = queue.items.length;
+  const runningCount = queue.items.filter((i) => i.status === "running" || i.status === "writing").length;
   const readyCount = queue.items.filter((i) => i.status === "ready_review").length;
   const completedCount = queue.items.filter((i) => i.status === "completed").length;
   const pausedCount = queue.items.filter((i) => i.status === "paused_key").length;
@@ -101,11 +114,12 @@ export function renderLineBreakBatchStage(
   const rowsHtml = queue.items
     .map((item) => {
       const spec = resolveLineBreakSpec(item.langCode);
+      const isItemBusy = item.status === "running" || item.status === "writing";
       const hasMultiTabs = item.availableTabs.length > 1;
       const sheetCellHtml = hasMultiTabs
         ? `
           <div class="batch-inline-cell">
-            <select class="select-input select-compact batch-sel-sheet" data-item-id="${esc(item.id)}" ${store.busy ? "disabled" : ""}>
+            <select class="select-input select-compact batch-sel-sheet" data-item-id="${esc(item.id)}" ${isItemBusy ? "disabled" : ""}>
               ${item.availableTabs
                 .map(
                   (t) =>
@@ -115,7 +129,7 @@ export function renderLineBreakBatchStage(
             </select>
             ${
               item.needsSheetConfirm
-                ? `<button type="button" class="btn btn-compact batch-btn-confirm-one" data-item-id="${esc(item.id)}" ${store.busy ? "disabled" : ""}>确认</button>`
+                ? `<button type="button" class="btn btn-compact batch-btn-confirm-one" data-item-id="${esc(item.id)}" ${isItemBusy ? "disabled" : ""}>确认</button>`
                 : ""
             }
           </div>`
@@ -141,7 +155,7 @@ export function renderLineBreakBatchStage(
             </div>
           </td>
           <td>
-            <select class="select-input select-compact batch-sel-lang" data-item-id="${esc(item.id)}" ${store.busy ? "disabled" : ""}>
+            <select class="select-input select-compact batch-sel-lang" data-item-id="${esc(item.id)}" ${isItemBusy ? "disabled" : ""}>
               ${renderLangOptions(spec.code)}
             </select>
           </td>
@@ -161,19 +175,20 @@ export function renderLineBreakBatchStage(
                 type="button"
                 class="btn btn-compact ${item.status === "ready_review" ? "btn-primary" : ""} batch-btn-preview"
                 data-item-id="${esc(item.id)}"
-                ${store.busy ? "disabled" : ""}
+                ${isItemBusy ? "disabled" : ""}
+                title="随时预览核对并微调（不影响其他正在后台运行的语种）"
               >预览核对</button>
               ${
                 canWriteThis
-                  ? `<button type="button" class="btn btn-compact btn-connected batch-btn-write-one" data-item-id="${esc(item.id)}" ${store.busy ? "disabled" : ""} title="确认无误，写入该原始表格新建 _已断行">确认写入</button>`
+                  ? `<button type="button" class="btn btn-compact btn-connected batch-btn-write-one" data-item-id="${esc(item.id)}" title="立即写入该原始表格新建 _已断行（无需等待其他语种跑完）">确认写入</button>`
                   : ""
               }
               ${
                 hasRunResult
-                  ? `<button type="button" class="btn btn-compact batch-btn-xlsx" data-item-id="${esc(item.id)}" ${store.busy ? "disabled" : ""} title="下载本地 .xlsx 文件">导出.xlsx</button>`
+                  ? `<button type="button" class="btn btn-compact batch-btn-xlsx" data-item-id="${esc(item.id)}" ${isItemBusy ? "disabled" : ""} title="下载本地 .xlsx 文件">导出.xlsx</button>`
                   : ""
               }
-              <button type="button" class="btn btn-compact batch-btn-rerun" data-item-id="${esc(item.id)}" ${store.busy ? "disabled" : ""}>
+              <button type="button" class="btn btn-compact batch-btn-rerun" data-item-id="${esc(item.id)}" ${isItemBusy ? "disabled" : ""}>
                 ${item.status === "paused_key" ? "续跑" : hasRunResult ? "重跑" : "单跑"}
               </button>
             </div>
@@ -188,16 +203,24 @@ export function renderLineBreakBatchStage(
       ${noticeHtml}
 
       ${
-        unconfirmedCount > 0
-          ? `<div class="notice-bar notice-info" role="region" aria-label="多工作表确认提示">
-              <span>检测到 <strong>${unconfirmedCount}</strong> 个语种表格内含有多个工作表，请先人工确认要断行的 Sheet。</span>
-              <button type="button" id="btn-open-multisheet-confirm" class="btn btn-compact btn-primary" ${store.busy ? "disabled" : ""}>集中确认多工作表 (${unconfirmedCount})</button>
+        lb.batchRunning
+          ? `<div class="notice-bar notice-info" role="status">
+              <span>后台正在并行处理中（${lb.batchConcurrency} 并发 · 当前活跃 ${runningCount} 个）。<strong>已就绪/已完成的语种可直接点「预览核对」或「确认写入」，无需等待全部结束！</strong></span>
             </div>`
           : ""
       }
 
       ${
-        pausedCount > 0 && !store.busy
+        unconfirmedCount > 0
+          ? `<div class="notice-bar notice-info" role="region" aria-label="多工作表确认提示">
+              <span>检测到 <strong>${unconfirmedCount}</strong> 个语种表格内含有多个工作表，请先人工确认要断行的 Sheet。</span>
+              <button type="button" id="btn-open-multisheet-confirm" class="btn btn-compact btn-primary" ${lb.batchRunning ? "disabled" : ""}>集中确认多工作表 (${unconfirmedCount})</button>
+            </div>`
+          : ""
+      }
+
+      ${
+        pausedCount > 0 && !lb.batchRunning
           ? `<div class="notice-bar notice-error" role="region" aria-label="断点接续提示">
               <span>当前有 <strong>${pausedCount}</strong> 个语种保存在中途断点（已完成的行不会重复消耗额度）。补充或更换可用 API Key 后即可无缝接续处理！</span>
               <div style="display:flex;gap:0.4rem;flex-shrink:0">
@@ -212,15 +235,16 @@ export function renderLineBreakBatchStage(
         <div class="batch-summary-left">
           <strong class="batch-queue-title">批量总表队列${queue.masterSheetTitle ? ` · ${esc(queue.masterSheetTitle)}` : ""}</strong>
           <span class="col-chip">共 ${totalCount} 个语种</span>
+          ${runningCount > 0 ? `<span class="col-chip">运行中 ${runningCount}</span>` : ""}
           ${readyCount > 0 ? `<span class="col-chip">待确认写入 ${readyCount}</span>` : ""}
           <span class="col-chip">已写入 ${completedCount}/${totalCount}</span>
           <span class="col-chip">L列待核对 ${totalReviews} 处</span>
         </div>
         ${
           readyCount > 0
-            ? `<button type="button" id="btn-batch-write-all-top" class="btn btn-compact btn-connected" ${store.busy ? "disabled" : ""}>
+            ? `<button type="button" id="btn-batch-write-all-top" class="btn btn-compact btn-connected" title="立即将已断行完成的语种写入 Google 表格，不影响仍在后台运行的任务">
                 ${icons.cloudSync}
-                <span>确认写入全部已断行表格 (${readyCount})</span>
+                <span>立即写入已就绪表格 (${readyCount})</span>
               </button>`
             : ""
         }
@@ -256,6 +280,12 @@ export function renderLineBreakBatchStage(
       </div>
     </main>
   `;
+
+  const nextWrap = container.querySelector<HTMLElement>(".table-wrapper");
+  if (nextWrap) {
+    nextWrap.scrollTop = prevScrollTop;
+    nextWrap.scrollLeft = prevScrollLeft;
+  }
 
   container.querySelector("#btn-dismiss-batch-notice")?.addEventListener("click", () => {
     store.notice = null;

@@ -24,6 +24,8 @@ import {
 } from "./punctuation";
 import {
   aggregateHymnSublinesForBlock,
+  dedupeRepeatedLyricClause,
+  extractTruncatedSentencePair,
   findArticleInCatalog,
   findBibleVerse,
   findHymnMatch,
@@ -31,8 +33,10 @@ import {
   findRosterMatch,
   locateParagraphInManuscript,
   lookupPhraseForNoteXx,
+  parseTruncationSpec,
   replaceNoteXxPlaceholders,
   resolveCitationText,
+  resolveComboHymnTitle,
 } from "./text-matcher";
 
 export interface PipelineOptions {
@@ -42,6 +46,12 @@ export interface PipelineOptions {
   onProgress?: (doneTasks: number, totalTasks: number, label: string) => void;
 }
 
+function alignAmenExclamation(line: string, srcRow: ScriptRow): string {
+  const wantsExclam = /[!！]["”»'’]*$/u.test((srcRow.english || srcRow.chinese || "").trim());
+  if (!wantsExclam) return line;
+  return line.replace(/[.。]$/u, "!");
+}
+
 export async function splitLordsPrayerFullText(
   fullText: string,
   blockRows: ScriptRow[],
@@ -49,7 +59,7 @@ export async function splitLordsPrayerFullText(
   gemini?: GeminiPoolClient,
 ): Promise<string[]> {
   const clean = fullText.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
-  if (blockRows.length <= 1) return [clean];
+  if (blockRows.length <= 1) return [alignAmenExclamation(clean, blockRows[0])];
 
   const lastRow = blockRows[blockRows.length - 1];
   const isLastRowAmen =
@@ -62,7 +72,7 @@ export async function splitLordsPrayerFullText(
   if (isLastRowAmen) {
     const tailMatch = /(?:^|\s+)([^\s]+(?:[!！.。।។။]+)?)\s*$/u.exec(bodyText);
     if (tailMatch && tailMatch.index > 0) {
-      amenTail = tailMatch[1].trim();
+      amenTail = alignAmenExclamation(tailMatch[1].trim(), lastRow);
       bodyText = bodyText.slice(0, tailMatch.index).trim();
     }
   }
@@ -87,17 +97,6 @@ export async function splitLordsPrayerFullText(
   return [...(firstLineLead ? [firstLineLead] : []), ...midSplit.lines, ...(amenTail ? [amenTail] : [])];
 }
 
-function buildSplitFullHint(
-  prefix: string,
-  fullText: string,
-  hasInversion?: boolean,
-): string {
-  const inv = hasInversion ? "（含倒装句，已保持原语序）" : "";
-  const cleanFull = fullText.replace(/\s+/g, " ").trim();
-  const base = prefix ? `${prefix}${inv}` : `长句/段落拆分${inv}`;
-  return cleanFull ? `${base}｜完整原文：${cleanFull}` : base;
-}
-
 interface DeferredAiSplit {
   req: BatchSplitRequest;
   apply: (split: SplitResult) => void;
@@ -118,6 +117,8 @@ export async function runLanguageExtractionPipeline(
 
   const tasks = classifyScriptTasks(script.rows);
   const deferredSplits: DeferredAiSplit[] = [];
+  const postBatchHooks: Array<() => void> = [];
+
   const ensureManuscript = async (docUrl: string): Promise<ArticleParagraph[]> => {
     if (!docUrl) return [];
     const cached = catalog.articleDocsCache.get(docUrl);
@@ -131,11 +132,11 @@ export async function runLanguageExtractionPipeline(
   for (let tIdx = 0; tIdx < tasks.length; tIdx += 1) {
     const task = tasks[tIdx];
     options.onProgress?.(tIdx + 1, tasks.length + (options.gemini?.hasKeys ? 1 : 0), task.sourceHint);
-    await processSingleTask(task, script.rows, catalog, results, options, ensureManuscript, deferredSplits);
+    await processSingleTask(task, script.rows, catalog, results, options, ensureManuscript, deferredSplits, postBatchHooks);
   }
 
   if (deferredSplits.length > 0) {
-    options.onProgress?.(tasks.length, tasks.length + 1, `AI 批量语义分句 (${deferredSplits.length} 块)...`);
+    options.onProgress?.(tasks.length, tasks.length + 1, `AI 语义对齐分句与双语复核 (${deferredSplits.length} 块)...`);
     const batchMap = await batchSplitTargetsWithAi(
       deferredSplits.map((d) => d.req),
       catalog.rule,
@@ -148,6 +149,10 @@ export async function runLanguageExtractionPipeline(
       };
       d.apply(hit);
     }
+  }
+
+  for (const hook of postBatchHooks) {
+    hook();
   }
 
   let matchedCount = 0;
@@ -169,6 +174,7 @@ async function processSingleTask(
   options: PipelineOptions,
   ensureManuscript: (url: string) => Promise<ArticleParagraph[]>,
   deferredSplits: DeferredAiSplit[],
+  postBatchHooks: Array<() => void>,
 ): Promise<void> {
   const firstIdx = task.rowIndices[0];
   const firstRow = rows[firstIdx];
@@ -222,7 +228,8 @@ async function processSingleTask(
     }
     if (catalog.lordsPrayer.length === blockRows.length) {
       task.rowIndices.forEach((rIdx, k) => {
-        results[rIdx].targetLanguage = catalog.lordsPrayer[k].target;
+        const line = catalog.lordsPrayer[k].target;
+        results[rIdx].targetLanguage = k === blockRows.length - 1 ? alignAmenExclamation(line, blockRows[k]) : line;
         results[rIdx].status = "matched";
       });
       return;
@@ -239,16 +246,12 @@ async function processSingleTask(
         },
         apply: (split) => {
           task.rowIndices.forEach((rIdx, k) => {
-            results[rIdx].targetLanguage = split.lines[k] ?? "";
+            const rawL = split.lines[k] ?? "";
+            results[rIdx].targetLanguage =
+              k === blockRows.length - 1 ? alignAmenExclamation(rawL, blockRows[k]) : rawL;
             results[rIdx].status = "matched";
-            if (k === 0) {
-              results[rIdx].hint = buildSplitFullHint(
-                split.usedAi ? "AI 已按词序号精准切分主祷文" : "主祷文长段拆分",
-                sourceFull,
-                split.hasInversion,
-              );
-            } else {
-              results[rIdx].hint = "同上完整句";
+            if (k === 0 && split.hasInversion) {
+              results[rIdx].hint = "含倒装句，已保持原语序";
             }
           });
         },
@@ -259,9 +262,6 @@ async function processSingleTask(
     task.rowIndices.forEach((rIdx, k) => {
       results[rIdx].targetLanguage = splitLines[k] ?? "";
       results[rIdx].status = "matched";
-      if (blockRows.length > 1) {
-        results[rIdx].hint = k === 0 ? buildSplitFullHint("主祷文长段拆分", sourceFull) : "同上完整句";
-      }
     });
     return;
   }
@@ -287,8 +287,6 @@ async function processSingleTask(
         linesCopy[0] = `${catalog.rule.ellipsis} ${linesCopy[0]}`;
       }
       const formatted = formatBibleBlockAndCitation(linesCopy, matched.targetCitationRef, catalog.rule);
-      // If there is no separate Subtitle citation row and the source row itself ends with an inline (Book chap:verse) reference,
-      // keep the formatted citation attached to the end of the final verse line instead of dropping it!
       const lastSrcRow = verseRows[verseRows.length - 1];
       const hasInlineRefInSrc =
         task.citationRowIndex === undefined &&
@@ -298,24 +296,22 @@ async function processSingleTask(
         const li = formatted.verseLines.length - 1;
         formatted.verseLines[li] = `${formatted.verseLines[li]} ${formatted.citationText}`;
       }
-      const isMulti = task.rowIndices.length > 1;
+
       task.rowIndices.forEach((rIdx, k) => {
         results[rIdx].targetLanguage = formatted.verseLines[k];
         if (matched.source) results[rIdx].bibleSource = matched.source;
-        results[rIdx].status = matched.truncatedStart ? "warning" : "matched";
-        if (k === 0) {
-          const baseHint = matched.truncatedStart
-            ? "涉及经文句首截取，请核对切分与省略号"
-            : split.usedAi
-              ? "AI 已按词序号精准分句"
-              : isMulti
-                ? "长句/段落拆分，请核对断行"
-                : "";
-          results[rIdx].hint = isMulti
-            ? buildSplitFullHint(baseHint, matched.text, split.hasInversion)
-            : baseHint;
-        } else if (isMulti) {
-          results[rIdx].hint = "同上完整句";
+        const rowTrunc = parseTruncationSpec(verseRows[k]);
+        if (rowTrunc.hasTruncation || (k === 0 && matched.truncatedStart)) {
+          results[rIdx].status = "warning";
+          const pairText = extractTruncatedSentencePair(matched.text, "", verseRows[k]);
+          results[rIdx].hint = pairText
+            ? `涉及截取（原完整句）：${pairText}`
+            : "涉及经文截取，请核对切分与省略号";
+        } else {
+          results[rIdx].status = "matched";
+          if (k === 0 && split.hasInversion) {
+            results[rIdx].hint = "含倒装句，已保持原语序";
+          }
         }
       });
       if (task.citationRowIndex !== undefined) {
@@ -325,7 +321,7 @@ async function processSingleTask(
       }
     };
 
-    if (options.gemini?.hasKeys && verseRows.length > 1) {
+    if (options.gemini?.hasKeys && (verseRows.length > 1 || matched.truncatedStart)) {
       deferredSplits.push({
         req: { id: task.id, fallbackText: matched.text, aiSourceText: matched.text, sourceRows: verseRows },
         apply: applyBibleSplit,
@@ -347,17 +343,20 @@ async function processSingleTask(
           ? hymn.lines.map((l) => stripOuterDoubleQuotes(l.target))
           : aggregateHymnSublinesForBlock(hymn.lines, blockRows) ??
             (await splitTargetIntoScriptLines(hymn.lines.map((l) => l.target).join(" "), blockRows, catalog.rule, options.gemini)).lines;
-      const quoted = formatQuotedBlockLines(rawLines, catalog.rule, true);
+      const deduped = rawLines.map((line, k) => dedupeRepeatedLyricClause(line, blockRows[k]?.english ?? ""));
+      const quoted = formatQuotedBlockLines(deduped, catalog.rule, true);
       task.rowIndices.forEach((rIdx, k) => {
         results[rIdx].targetLanguage = quoted[k];
-        const hasTrunc = blockRows[k].remark.includes("涉及截取");
-        results[rIdx].status = hasTrunc ? "warning" : "matched";
-        if (hasTrunc) results[rIdx].hint = "歌词涉及原文截取，请核对";
+        const trunc = parseTruncationSpec(blockRows[k]);
+        results[rIdx].status = trunc.hasTruncation ? "warning" : "matched";
+        if (trunc.hasTruncation) {
+          results[rIdx].hint = "歌词涉及原文截取，请核对";
+        }
       });
       return;
     }
     if (task.sourceHint.includes("卷")) {
-      await extractFromArticleManuscript(task, rows, catalog, results, options, ensureManuscript, deferredSplits);
+      await extractFromArticleManuscript(task, rows, catalog, results, options, ensureManuscript, deferredSplits, postBatchHooks);
       return;
     }
     for (const idx of task.rowIndices) {
@@ -368,7 +367,7 @@ async function processSingleTask(
   }
 
   if (task.kind === "god_words_body") {
-    await extractFromArticleManuscript(task, rows, catalog, results, options, ensureManuscript, deferredSplits);
+    await extractFromArticleManuscript(task, rows, catalog, results, options, ensureManuscript, deferredSplits, postBatchHooks);
     return;
   }
 
@@ -393,10 +392,21 @@ async function processSingleTask(
 
   if (task.kind === "combo_title") {
     const hymn = findHymnMatch(catalog.hymns, firstRow.chinese);
-    if (hymn?.targetTitle) {
-      results[firstIdx].targetLanguage = formatStandaloneTitle(hymn.targetTitle, "", "", catalog.rule);
-      results[firstIdx].status = "warning";
-      results[firstIdx].hint = "已填入目标语种歌名，固定前缀待组合";
+    const fallbackArticleTitle =
+      !hymn?.targetTitle && firstRow.chinese.includes("诗歌")
+        ? findArticleInCatalog(catalog.articles, firstRow.chinese, firstRow.chinese, firstRow.english)?.targetTitle
+        : "";
+    const targetSongTitle = hymn?.targetTitle || fallbackArticleTitle || "";
+    if (targetSongTitle) {
+      const composed = resolveComboHymnTitle(catalog, firstRow, targetSongTitle);
+      if (composed.fullyComposed) {
+        results[firstIdx].targetLanguage = composed.text;
+        results[firstIdx].status = "matched";
+      } else {
+        results[firstIdx].targetLanguage = formatStandaloneTitle(targetSongTitle, "", "", catalog.rule);
+        results[firstIdx].status = "warning";
+        results[firstIdx].hint = "已填入目标语种歌名，固定前缀待组合";
+      }
     } else {
       results[firstIdx].status = "missing";
       results[firstIdx].hint = "诗歌表中未找到对应歌名";
@@ -427,6 +437,37 @@ async function processSingleTask(
   }
 }
 
+/**
+ * Splits a block into contiguous sub-segments whenever:
+ * - the previous row had an omission ("有省略" or trailing …… / …), OR
+ * - the current row (k > 0) starts a newly truncated sentence ("截取").
+ * This guarantees multi-jump hymns/excerpts (like 《神希望人能追求真理剩存下来》) locate each jump cleanly!
+ */
+function splitBlockIntoContiguousSubSegments(rowIndices: number[], rows: ScriptRow[]): number[][] {
+  const segments: number[][] = [];
+  let cur: number[] = [];
+  for (let k = 0; k < rowIndices.length; k += 1) {
+    const rIdx = rowIndices[k];
+    const row = rows[rIdx];
+    const prevRow = k > 0 ? rows[rowIndices[k - 1]] : null;
+    const prevHadOmission = Boolean(
+      prevRow &&
+        (prevRow.remark.includes("有省略") ||
+          prevRow.chinese.includes("……") ||
+          /(?:…|\.\.\.)["”»'’]*$/u.test(prevRow.english.trim())),
+    );
+    const curStartsTruncation = k > 0 && parseTruncationSpec(row).hasTruncation;
+
+    if (cur.length > 0 && (prevHadOmission || curStartsTruncation)) {
+      segments.push(cur);
+      cur = [];
+    }
+    cur.push(rIdx);
+  }
+  if (cur.length > 0) segments.push(cur);
+  return segments;
+}
+
 async function extractFromArticleManuscript(
   task: ExtractionTask,
   rows: ScriptRow[],
@@ -435,8 +476,8 @@ async function extractFromArticleManuscript(
   options: PipelineOptions,
   ensureManuscript: (url: string) => Promise<ArticleParagraph[]>,
   deferredSplits: DeferredAiSplit[],
+  postBatchHooks: Array<() => void>,
 ): Promise<void> {
-  const blockRows = task.rowIndices.map((idx) => rows[idx]);
   const nextRow = rows[task.rowIndices[task.rowIndices.length - 1] + 1];
   const article = findArticleInCatalog(catalog.articles, task.sourceHint, nextRow?.chinese ?? "", nextRow?.english ?? "");
 
@@ -449,8 +490,36 @@ async function extractFromArticleManuscript(
   }
 
   const paragraphs = await ensureManuscript(article.docUrl);
-  const located = locateParagraphInManuscript(paragraphs, blockRows);
-  if (!located) {
+  const subSegments = splitBlockIntoContiguousSubSegments(task.rowIndices, rows);
+  const isHymnTask = task.kind === "hymn_lyrics";
+
+  const hasFollowingCitation = Boolean(
+    nextRow && /摘自|卷|话|from the word|\(the word/i.test(`${nextRow.chinese} ${nextRow.english}`),
+  );
+
+  // Locate each sub-segment; if sub-segment 0 is a 1-row opener before multi-row sub-segment 1,
+  // anchor sub-segment 1 first so sub-segment 0 prefers paragraphs near sub-segment 1 (avoiding intro false matches!).
+  const locatedBySeg: Array<ReturnType<typeof locateParagraphInManuscript>> = new Array(subSegments.length).fill(null);
+
+  for (let s = subSegments.length - 1; s >= 0; s -= 1) {
+    const segRows = subSegments[s].map((idx) => rows[idx]);
+    let pool = paragraphs;
+    if (s === 0 && subSegments.length > 1 && segRows.length === 1 && locatedBySeg[1]) {
+      const nextTarget = locatedBySeg[1]!.fullParagraphTarget;
+      const anchorIdx = paragraphs.findIndex((p) => p.target && nextTarget.includes(p.target.trim().slice(0, 40)));
+      if (anchorIdx > 0) {
+        const nearPool = paragraphs.slice(Math.max(0, anchorIdx - 3), anchorIdx + 2);
+        const nearHit = locateParagraphInManuscript(nearPool, segRows);
+        if (nearHit) {
+          locatedBySeg[s] = nearHit;
+          continue;
+        }
+      }
+    }
+    locatedBySeg[s] = locateParagraphInManuscript(pool, segRows);
+  }
+
+  if (locatedBySeg.every((loc) => !loc)) {
     for (const idx of task.rowIndices) {
       results[idx].status = "missing";
       results[idx].hint = article.docUrl ? `单篇《${article.zhTitle}》中未定位到对应段落` : `篇目《${article.zhTitle}》缺少单篇链接`;
@@ -458,68 +527,97 @@ async function extractFromArticleManuscript(
     return;
   }
 
-  const hasFollowingCitation = Boolean(
-    nextRow && /摘自|卷|话|from the word|\(the word/i.test(`${nextRow.chinese} ${nextRow.english}`),
-  );
+  // Collect unquoted split lines per row across all sub-segments, then format outer quotes across the whole task block!
+  const unquotedByRowIndex = new Map<number, string>();
+  let pendingSegments = 0;
 
-  const applyArticleSplit = (split: SplitResult) => {
-    const quoted = formatQuotedBlockLines(split.lines, catalog.rule, true, hasFollowingCitation);
-    const hasOmission = blockRows.some((r) => r.remark.includes("有省略") || r.chinese.includes("……"));
-    const isMulti = task.rowIndices.length > 1;
-    const fullForHint = located.matchedText || located.fullParagraphTarget;
-
+  const finalizeWholeBlockQuotes = () => {
+    const orderedRaw = task.rowIndices.map((rIdx) => unquotedByRowIndex.get(rIdx) ?? "");
+    if (orderedRaw.every((s) => !s)) return;
+    const quoted = formatQuotedBlockLines(orderedRaw, catalog.rule, true, hasFollowingCitation);
     task.rowIndices.forEach((rIdx, k) => {
-      results[rIdx].targetLanguage = quoted[k];
-      const rowTrunc = blockRows[k].remark.includes("涉及截取");
-      const rowOmit = blockRows[k].remark.includes("有省略") || blockRows[k].chinese.includes("……");
-      let rowHint = "";
-      if (rowTrunc) {
-        results[rIdx].status = "warning";
-        rowHint = split.usedAi ? "AI 已按词序号精准截取，请顺便核对首字母" : "涉及句首截取（未启用AI），请核对外文截取位置";
-      } else if (rowOmit) {
-        results[rIdx].status = "warning";
-        rowHint = "此处原文中间有省略，请核对省略号衔接";
-      } else if (located.isPartial && !split.usedAi) {
-        results[rIdx].status = "warning";
-        rowHint = options.gemini?.hasKeys
-          ? "AI 分句调用失败（已回退子句估算），请点「缺失日志」下载查看具体报错原因"
-          : "局部半句截取（未配置 API 密钥，已按子句估算）";
-      } else {
-        results[rIdx].status = hasOmission && !split.usedAi ? "warning" : "matched";
-        if (split.usedAi && k === 0) rowHint = "AI 已按词序号精准分句";
-      }
-
-      if (isMulti) {
-        if (k === 0) {
-          results[rIdx].hint = buildSplitFullHint(rowHint || "长句/段落拆分，请核对断行", fullForHint, split.hasInversion);
-        } else {
-          results[rIdx].hint = rowHint ? `${rowHint}｜同上完整句` : "同上完整句";
-        }
-      } else {
-        results[rIdx].hint = rowHint;
+      if (unquotedByRowIndex.has(rIdx)) {
+        results[rIdx].targetLanguage = quoted[k];
       }
     });
   };
 
-  const needAi = blockRows.length > 1 || located.isPartial;
-  if (options.gemini?.hasKeys && needAi) {
-    deferredSplits.push({
-      req: {
-        id: task.id,
-        fallbackText: located.matchedText,
-        aiSourceText: located.contextWindowTarget,
+  for (let s = 0; s < subSegments.length; s += 1) {
+    const segIndices = subSegments[s];
+    const segRows = segIndices.map((idx) => rows[idx]);
+    const located = locatedBySeg[s];
+    if (!located) {
+      for (const rIdx of segIndices) {
+        results[rIdx].status = "missing";
+        results[rIdx].hint = `单篇《${article.zhTitle}》中未定位到该子段`;
+      }
+      continue;
+    }
+
+    const applySegSplit = (split: SplitResult) => {
+      segIndices.forEach((rIdx, k) => {
+        unquotedByRowIndex.set(rIdx, split.lines[k] ?? "");
+        const row = segRows[k];
+        const truncSpec = parseTruncationSpec(row);
+        const rowExplicitOmit =
+          !isHymnTask &&
+          (row.remark.includes("有省略") || row.chinese.includes("……") || /(?:…|\.\.\.)["”»'’]*$/u.test(row.english.trim()));
+
+        if (truncSpec.hasTruncation) {
+          results[rIdx].status = "warning";
+          const sentencePair = extractTruncatedSentencePair(
+            located.fullParagraphTarget,
+            located.fullParagraphEn,
+            row,
+          );
+          results[rIdx].hint = sentencePair
+            ? `涉及截取（原完整句）：${sentencePair}`
+            : "涉及截取，请核对句首切分与大小写";
+        } else if (rowExplicitOmit) {
+          results[rIdx].status = "warning";
+          results[rIdx].hint = "此处原文中间有省略，请核对省略号衔接";
+        } else if (located.isPartial && !split.usedAi) {
+          results[rIdx].status = "warning";
+          results[rIdx].hint = options.gemini?.hasKeys
+            ? "AI 分句调用失败（已回退子句估算），请点「缺失日志」下载查看具体报错原因"
+            : "局部半句截取（未配置 API 密钥，已按子句估算）";
+        } else {
+          results[rIdx].status = "matched";
+          results[rIdx].hint = k === 0 && split.hasInversion ? "含倒装句，已保持原语序" : "";
+        }
+      });
+    };
+
+    const hasTruncInSeg = segRows.some((r) => parseTruncationSpec(r).hasTruncation);
+    const needAi = segRows.length > 1 || located.isPartial || hasTruncInSeg;
+
+    if (options.gemini?.hasKeys && needAi) {
+      pendingSegments += 1;
+      deferredSplits.push({
+        req: {
+          id: `${task.id}_seg${s}`,
+          fallbackText: located.matchedText,
+          aiSourceText: located.contextWindowTarget,
+          referenceEn: located.fullParagraphEn,
+          sourceRows: segRows,
+          suppressAutoEllipsis: isHymnTask,
+        },
+        apply: applySegSplit,
+      });
+    } else {
+      const split = await splitTargetIntoScriptLines(located.matchedText, segRows, catalog.rule, undefined, {
+        fullParagraphTarget: located.contextWindowTarget,
         referenceEn: located.fullParagraphEn,
-        sourceRows: blockRows,
-      },
-      apply: applyArticleSplit,
-    });
-    return;
+        isPartial: located.isPartial,
+        suppressAutoEllipsis: isHymnTask,
+      });
+      applySegSplit(split);
+    }
   }
 
-  const split = await splitTargetIntoScriptLines(located.matchedText, blockRows, catalog.rule, undefined, {
-    fullParagraphTarget: located.contextWindowTarget,
-    referenceEn: located.fullParagraphEn,
-    isPartial: located.isPartial,
-  });
-  applyArticleSplit(split);
+  if (pendingSegments > 0) {
+    postBatchHooks.push(finalizeWholeBlockQuotes);
+  } else {
+    finalizeWholeBlockQuotes();
+  }
 }
