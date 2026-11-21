@@ -1,6 +1,6 @@
 [package]
 name = "text-organization"
-version = "0.3.1"
+version = "0.3.2"
 description = "文字整理工具"
 authors = ["zcnz2026"]
 edition = "2021"

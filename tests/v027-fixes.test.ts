@@ -232,7 +232,26 @@ describe("quote nesting, disambiguation, span boundary repair & source column", 
         lordsPrayer: [],
         rosterEntries: [],
       },
-      { enableRosterPreFill: false },
+      {
+        enableRosterPreFill: false,
+        gemini: {
+          hasKeys: true,
+          async generateStructuredJson(input: { userPrompt: string }) {
+            const idMatch = /任务ID:\s*(\S+)/.exec(input.userPrompt);
+            return {
+              results: [
+                {
+                  id: idMatch?.[1] ?? "task_0",
+                  lines: [
+                    "Весняне сонце заливає пагорби,",
+                    "і все тихо росте.",
+                  ],
+                },
+              ],
+            };
+          },
+        } as never,
+      },
     );
 
     // Non-truncated multi-row split blocks keep hint clean (no full-paragraph dump)

@@ -1,4 +1,5 @@
 import { SUPPORTED_GEMINI_MODELS } from "../ai/gemini-client";
+import { getTotalTodayCallsSummary } from "../ai/key-usage-store";
 import { BUILTIN_PUNCTUATION_RULES } from "../catalog/lang-presets";
 import { getActiveLineBreakSpecs } from "../linebreak/presets";
 import { icons } from "./icons";
@@ -48,9 +49,10 @@ export function mountSettingsDialog(
     const modelLabel =
       SUPPORTED_GEMINI_MODELS.find((m) => m.id === store.geminiModel)?.label ??
       store.geminiModel;
+    const quotaSum = getTotalTodayCallsSummary(keyCount);
     const geminiStatusText =
       keyCount > 0
-        ? `已配置 ${keyCount} 个密钥 · ${modelLabel}${store.geminiEnabled ? "" : "（已暂停）"}`
+        ? `已配置 ${keyCount} 个密钥 · 今日已调用 ${quotaSum.totalCallsToday} / ${quotaSum.totalCapacity} 次 · ${modelLabel}${store.geminiEnabled ? "" : "（已暂停）"}`
         : "尚未配置 Gemini API Key";
 
     const cfgCount = store.linksByLang.size;

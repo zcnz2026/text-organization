@@ -73,8 +73,27 @@ describe("synthetic end-to-end extraction pipeline", () => {
       ],
     };
 
+    const mockGemini = {
+      hasKeys: true,
+      async generateStructuredJson(input: { userPrompt: string }) {
+        const idMatch = /任务ID:\s*(\S+)/.exec(input.userPrompt);
+        return {
+          results: [
+            {
+              id: idMatch?.[1] ?? "task_0",
+              lines: [
+                "Весняне сонце заливає пагорби,",
+                "і все тихо росте.",
+              ],
+            },
+          ],
+        };
+      },
+    } as never;
+
     const out = await runLanguageExtractionPipeline(doc, ukCatalog, {
       enableRosterPreFill: true,
+      gemini: mockGemini,
     });
     expect(out.missingCount).toBe(0);
     expect(out.matchedCount).toBeGreaterThanOrEqual(5);

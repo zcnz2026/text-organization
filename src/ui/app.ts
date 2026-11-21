@@ -158,7 +158,38 @@ export async function mountWorkbenchApp(appRoot: HTMLElement): Promise<void> {
         onOpenCatalogConfigDialog: () => openCatalogConfigDialog("per-lang"),
         onLoadCloudPreview: () => void loadCloudSourceAndMatrix(),
         onImportLocalCsv: (file) => void importLocalCsvFile(file),
-        onRunExtraction: () => void runMultiLanguageExtraction(),
+        onRunExtraction: () =>
+          void (async () => {
+            await runMultiLanguageExtraction();
+            let safetyBlankRows = 0;
+            let quotaBlankRows = 0;
+            for (const run of store.runsByLang.values()) {
+              for (const r of run.rows) {
+                if (
+                  r.status === "missing" &&
+                  /已留空|额度|AI\s*密钥|未配置\s*AI|双语核对/i.test(r.hint || "")
+                ) {
+                  safetyBlankRows += 1;
+                  if (/额度|AI\s*密钥|未配置\s*AI|耗尽|不可用/i.test(r.hint || "")) {
+                    quotaBlankRows += 1;
+                  }
+                }
+              }
+            }
+            if (safetyBlankRows > 0 && store.notice) {
+              const reasonText =
+                quotaBlankRows > 0
+                  ? `其中 ${safetyBlankRows} 行因无可用 AI 密钥、今日额度用尽或未通过双语核对已安全留空（宁缺毋滥，绝不强制乱填），请点击右上角「设置 → API 密钥池」检测/补充可用 AIza 密钥后重跑。`
+                  : `其中 ${safetyBlankRows} 行因跨行分句未通过双语核对已安全留空（宁缺毋滥，未强制乱填），可在「未找到」筛选标签中人工核对。`;
+              if (!store.notice.message.includes("已安全留空")) {
+                store.notice = {
+                  type: quotaBlankRows > 0 ? "error" : store.notice.type,
+                  message: `${store.notice.message} ${reasonText}`,
+                };
+              }
+            }
+            notifyStateChanged();
+          })(),
         onSyncReviewedCloud: () => void syncReviewedSheetsToCloud(),
         onExportXlsx: exportCurrentRunsXlsx,
       });
