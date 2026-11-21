@@ -65,7 +65,7 @@ export function formatAiFailureHint(split: SplitResult | undefined, hasKeys: boo
     return `AI 接口请求异常（${rawReason}，已留空，不强制估算）：请检查密钥池或补充额度后重跑`;
   }
   const cleanReason = rawReason.replace(/^双语核对未通过[：:\s]*/, "").trim() || "行间语义或行数未对齐";
-  return `AI 分句未通过严格双语核对（经多轮换 Key 重试仍未通过双语核对：${cleanReason}，已留空）：请人工核对`;
+  return `原文已定位，但 AI 分句未通过严格双语核对（经多轮换 Key 重试仍未通过双语核对：${cleanReason}，已留空）：请展开左侧「运行过程日志」查看定位原文与对照，请人工核对`;
 }
 
 const formatSplitFailureHint = formatAiFailureHint;
@@ -318,9 +318,14 @@ async function processSingleTask(
           const rawL = split.lines[k].trim();
           results[rIdx].targetLanguage =
             k === blockRows.length - 1 ? alignAmenExclamation(rawL, blockRows[k]) : rawL;
-          results[rIdx].status = "matched";
-          if (k === 0 && split.hasInversion) {
-            results[rIdx].hint = "含语序倒装，已通过 AI 语义核对";
+          if (split.softWarningReason) {
+            results[rIdx].status = "warning";
+            results[rIdx].hint = split.softWarningReason;
+          } else {
+            results[rIdx].status = "matched";
+            if (k === 0 && split.hasInversion) {
+              results[rIdx].hint = "含语序倒装，已通过 AI 语义核对";
+            }
           }
         });
       },
@@ -345,7 +350,11 @@ async function processSingleTask(
       return;
     }
 
-    const applyValidBibleLines = (rawLines: string[], hasInversion?: boolean) => {
+    const applyValidBibleLines = (
+      rawLines: string[],
+      hasInversion?: boolean,
+      softWarningReason?: string,
+    ) => {
       const linesCopy = [...rawLines];
       if (matched.truncatedStart && linesCopy.length > 0 && !linesCopy[0].startsWith(catalog.rule.ellipsis)) {
         linesCopy[0] = `${catalog.rule.ellipsis} ${linesCopy[0]}`;
@@ -371,6 +380,9 @@ async function processSingleTask(
           results[rIdx].hint = pairText
             ? `涉及截取（原完整句）：${pairText}`
             : "涉及经文截取，请核对切分与省略号";
+        } else if (softWarningReason) {
+          results[rIdx].status = "warning";
+          results[rIdx].hint = softWarningReason;
         } else {
           results[rIdx].status = "matched";
           if (k === 0 && hasInversion) {
@@ -436,7 +448,7 @@ async function processSingleTask(
           applyFailedBibleSplit(formatSplitFailureHint(split, true));
           return;
         }
-        applyValidBibleLines(split.lines, split.hasInversion);
+        applyValidBibleLines(split.lines, split.hasInversion, split.softWarningReason);
       },
     });
     return;
@@ -446,15 +458,20 @@ async function processSingleTask(
     const blockRows = task.rowIndices.map((idx) => rows[idx]);
     const hymn = findHymnMatch(catalog.hymns, task.sourceHint);
     if (hymn && hymn.lines.length > 0) {
-      const applyHymnLines = (rawLines: string[]) => {
+      const applyHymnLines = (rawLines: string[], softWarningReason?: string) => {
         const deduped = rawLines.map((line, k) => dedupeRepeatedLyricClause(line, blockRows[k]?.english ?? ""));
         const quoted = formatQuotedBlockLines(deduped, catalog.rule, true);
         task.rowIndices.forEach((rIdx, k) => {
           results[rIdx].targetLanguage = quoted[k];
           const trunc = parseTruncationSpec(blockRows[k]);
-          results[rIdx].status = trunc.hasTruncation ? "warning" : "matched";
           if (trunc.hasTruncation) {
+            results[rIdx].status = "warning";
             results[rIdx].hint = "歌词涉及原文截取，请核对";
+          } else if (softWarningReason) {
+            results[rIdx].status = "warning";
+            results[rIdx].hint = softWarningReason;
+          } else {
+            results[rIdx].status = "matched";
           }
         });
       };
@@ -509,7 +526,7 @@ async function processSingleTask(
             });
             return;
           }
-          applyHymnLines(split.lines);
+          applyHymnLines(split.lines, split.softWarningReason);
         },
       });
       return;
@@ -844,6 +861,9 @@ async function extractFromArticleManuscript(
           } else if (rowExplicitOmit) {
             results[rIdx].status = "warning";
             results[rIdx].hint = "此处原文中间有省略，请核对省略号衔接";
+          } else if (split.softWarningReason) {
+            results[rIdx].status = "warning";
+            results[rIdx].hint = split.softWarningReason;
           } else {
             results[rIdx].status = "matched";
             results[rIdx].hint = k === 0 && split.hasInversion ? "含语序倒装，已通过 AI 语义核对" : "";

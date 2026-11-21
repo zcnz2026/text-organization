@@ -26,6 +26,7 @@ export interface SplitResult {
   usedAi: boolean;
   failed?: boolean;
   hasInversion?: boolean;
+  softWarningReason?: string;
   errorReason?: string;
 }
 
@@ -733,26 +734,53 @@ export function analyzeBilingualAlignment(
     }
   }
 
-  // Hard Check 2: Per-row question mark count equality
+  // Check 2: Dual-source (Chinese + English) question mark count check
+  let softReason: string | null = null;
   for (let i = 0; i < lines.length; i += 1) {
-    const srcRef = (sourceRows[i]?.english || sourceRows[i]?.chinese || "").trim();
-    if (!srcRef) continue;
-    const srcQ = countSrcQuestions(srcRef);
+    const zhText = (sourceRows[i]?.chinese || "").trim();
+    const enText = (sourceRows[i]?.english || "").trim();
+    if (!zhText && !enText) continue;
+
+    const zhQ = zhText ? countSrcQuestions(zhText) : -1;
+    const enQ = enText ? countSrcQuestions(enText) : -1;
     const tgQ = countTargetQuestions(lines[i], rule.langCode);
-    if (srcQ !== tgQ) {
+
+    // If target matches EITHER Chinese question count OR English question count (e.g. ZH=2?, EN=1?, UK=2?), 100% valid!
+    if ((zhQ >= 0 && tgQ === zhQ) || (enQ >= 0 && tgQ === enQ)) {
+      continue;
+    }
+
+    const validSrcQs = [zhQ, enQ].filter((q) => q >= 0);
+    const maxSrcQ = Math.max(...validSrcQs);
+    const minSrcQ = Math.min(...validSrcQs);
+    const displaySrcQ = enQ >= 0 ? enQ : zhQ;
+
+    // Case A: Statement <-> Question line-shift misalignment (0 vs >0, or >0 vs 0) -> hardReason!
+    if ((maxSrcQ === 0 && tgQ > 0) || (minSrcQ > 0 && tgQ === 0)) {
       return {
-        hardReason: `第 ${i + 1} 行问号数量不一致（源文 ${srcQ} 个 vs 目标语 ${tgQ} 个）`,
+        hardReason: `第 ${i + 1} 行问号数量不一致（源文 ${displaySrcQ} 个 vs 目标语 ${tgQ} 个）`,
         softReason: null,
       };
     }
+
+    // Case B: Both source and target are questions, but differ in rhetorical split count (e.g. 1? vs 2?) -> softReason!
+    if (!softReason) {
+      softReason = `第 ${i + 1} 行问号数量存在修辞差异（源文 ${displaySrcQ} 个 vs 目标语 ${tgQ} 个，需 AI 语义核对）`;
+    }
   }
 
-  // Hard Check 3: Final row sentence-ending punctuation consistency
+  // Hard Check 3: Final row sentence-ending punctuation consistency (must be strong in all present sources)
   if (!NO_STANDARD_PUNCT_LANGS.has(rule.langCode)) {
     const lastIdx = lines.length - 1;
-    const lastSrc = (sourceRows[lastIdx]?.english || sourceRows[lastIdx]?.chinese || "").trim();
+    const presentLastSrcs = [sourceRows[lastIdx]?.chinese || "", sourceRows[lastIdx]?.english || ""]
+      .map((s) => s.trim())
+      .filter(Boolean);
     const lastTg = lines[lastIdx].trim();
-    if (endsWithStrongSentencePunct(lastSrc) && endsWithCommaOrColonPunct(lastTg)) {
+    if (
+      presentLastSrcs.length > 0 &&
+      presentLastSrcs.every((s) => endsWithStrongSentencePunct(s)) &&
+      endsWithCommaOrColonPunct(lastTg)
+    ) {
       return {
         hardReason: `第 ${lastIdx + 1} 行（末行）句末标点错位（源文以句号/问号/叹号结束，目标语却以逗号/冒号结束，疑似漏掉末半句）`,
         softReason: null,
@@ -760,15 +788,23 @@ export function analyzeBilingualAlignment(
     }
   }
 
-  // Hard Check 4: Adjacent row period/comma swap & multi-row sentence-end punctuation drift
+  // Check 4: Adjacent row period/comma swap (hardReason) vs. unidirectional punctuation style difference (softReason)
   if (!NO_STANDARD_PUNCT_LANGS.has(rule.langCode) && lines.length >= 2) {
+    const rowRequiresStrong = (r: ScriptRow | undefined): boolean => {
+      const srcs = [r?.chinese || "", r?.english || ""].map((s) => s.trim()).filter(Boolean);
+      return srcs.length > 0 && srcs.every((s) => endsWithStrongSentencePunct(s));
+    };
+    const rowRequiresComma = (r: ScriptRow | undefined): boolean => {
+      const srcs = [r?.chinese || "", r?.english || ""].map((s) => s.trim()).filter(Boolean);
+      return srcs.length > 0 && srcs.every((s) => endsWithCommaOrColonPunct(s));
+    };
+
     let punctContradictions = 0;
     for (let i = 0; i < lines.length; i += 1) {
-      const src = (sourceRows[i]?.english || sourceRows[i]?.chinese || "").trim();
+      const rCur = sourceRows[i];
       const tg = lines[i].trim();
-      if (!src) continue;
-      const srcStrong = endsWithStrongSentencePunct(src);
-      const srcComma = endsWithCommaOrColonPunct(src);
+      const srcStrong = rowRequiresStrong(rCur);
+      const srcComma = rowRequiresComma(rCur);
       const tgStrong = endsWithStrongSentencePunct(tg);
       const tgComma = endsWithCommaOrColonPunct(tg);
 
@@ -777,10 +813,10 @@ export function analyzeBilingualAlignment(
       }
 
       if (i < lines.length - 1) {
-        const nextSrc = (sourceRows[i + 1]?.english || sourceRows[i + 1]?.chinese || "").trim();
+        const rNext = sourceRows[i + 1];
         const nextTg = lines[i + 1].trim();
-        const nextSrcStrong = endsWithStrongSentencePunct(nextSrc);
-        const nextSrcComma = endsWithCommaOrColonPunct(nextSrc);
+        const nextSrcStrong = rowRequiresStrong(rNext);
+        const nextSrcComma = rowRequiresComma(rNext);
         const nextTgStrong = endsWithStrongSentencePunct(nextTg);
         const nextTgComma = endsWithCommaOrColonPunct(nextTg);
 
@@ -795,17 +831,13 @@ export function analyzeBilingualAlignment(
         }
       }
     }
-    if (punctContradictions >= 2) {
-      return {
-        hardReason: `存在 ${punctContradictions} 行句末句号/逗号与源文矛盾（多行顺延错行）`,
-        softReason: null,
-      };
+    if (punctContradictions >= 2 && !softReason) {
+      softReason = `存在 ${punctContradictions} 行句号/逗号风格与源文不同，需 AI 语义核对`;
     }
   }
 
   // Soft Check 5: Per-row length share & extreme short/long mismatch (may be caused by clause inversion)
-  let softReason: string | null = null;
-  if (lines.length >= 2) {
+  if (!softReason && lines.length >= 2) {
     const stripEllipsisAndQuotes = (s: string) =>
       stripOuterDoubleQuotes((s || "").trim())
         .replace(/(?:……|\.\.\.|…|\[\.\.\.\]|\(\.\.\.\))+$/u, "")
@@ -934,9 +966,9 @@ export async function semanticAuditOrFixWithAi(
     }>(
       {
         systemInstruction:
-          "你是多语种剧本三语语义审校与重切裁判。请逐行对比下面每一行的【中文】【英文】与【当前外文切分】的实际语义（不要只看字数长短）：\n" +
-          "1. 若因跨语种句式差异或从句语序倒装导致某行外文字数与英文长短悬殊，但每一行外文表达的意思与该行中英文对应准确、且未遗漏或多吞原文句子，请返回 verdict:\"accurate\", hasInversion:true。\n" +
-          "2. 若确实存在跨行顺延错位、问号/句号错位、遗漏了结尾句/开头句，或末行误吞了省略号之后的多余句子，请基于【不可改动的完整外文串】重新 1:1 切分，返回 verdict:\"fixed\" 及严格等于字幕行数的 fixedLines 数组（严禁修改、增删任何外文单词或标点！）。\n" +
+          "你是多语种剧本三语语义审校与重切裁判。请逐行对比下面每一行的【中文】【英文】与【当前外文切分】的实际语义（不要只看字数长短或标点符号风格）：\n" +
+          "1. 若因跨语种标点风格差异（如源文 1 个问句在目标语中译为 2 个连问句、或源文逗号长句在目标语中合法断为句号短句）或从句语序倒装，但每一行外文表达的意思与该行中英文完全对应、没有跨行错位或漏句，请返回 verdict:\"accurate\" 并在 reason 中简述原因。\n" +
+          "2. 若确实存在跨行顺延错位、问号/句号错行、遗漏了结尾句/开头句，或末行误吞了省略号之后的多余句子，请基于【不可改动的完整外文串】重新 1:1 切分，返回 verdict:\"fixed\" 及严格等于字幕行数的 fixedLines 数组（严禁修改、增删任何外文单词或标点！）。\n" +
           "3. 若定稿原文与中英文完全对不上无法修复，返回 verdict:\"unfixable\"。" +
           partialOmitRule,
         userPrompt:
@@ -1515,11 +1547,14 @@ export async function batchSplitTargetsWithAi(
           );
 
           let passedAlignment = analysis.hardReason === null && analysis.softReason === null;
+          let softWarningReason: string | undefined;
           let lastAuditRes: SemanticAuditResult | undefined;
 
           // Upgrade C: When either hardReason or softReason triggers, invoke AI Semantic Referee (on alternate Key)
           if (!passedAlignment) {
             const triggerReason = (analysis.hardReason ?? analysis.softReason)!;
+            const isPunctSoftTrigger =
+              analysis.hardReason === null && /问号|标点|句号|逗号/.test(triggerReason);
             diagLog.info(
               "AI 语义复核",
               `[${rule.langName}] ${req.id} 触发 AI 语义复核（${triggerReason}），切换备用 Key 对比三语语义...`,
@@ -1555,6 +1590,9 @@ export async function batchSplitTargetsWithAi(
                 analysis = recheck;
                 passedAlignment = true;
                 if (auditRes.hasInversion) hasInversion = true;
+                if (recheck.softReason && /问号|标点|句号|逗号/.test(recheck.softReason)) {
+                  softWarningReason = "仅标点差异，已通过 AI 语义核对，请人工顺便确认";
+                }
                 diagLog.info(
                   "AI 语义复核",
                   `[${rule.langName}] ${req.id} 经 AI 语义复核重切通过（${auditRes.reason}）`,
@@ -1564,10 +1602,15 @@ export async function batchSplitTargetsWithAi(
               }
             } else if (auditRes.verdict === "accurate" && analysis.hardReason === null) {
               passedAlignment = true;
-              hasInversion = Boolean(auditRes.hasInversion ?? true);
+              if (isPunctSoftTrigger) {
+                softWarningReason = "仅标点差异，已通过 AI 语义核对，请人工顺便确认";
+                if (auditRes.hasInversion) hasInversion = true;
+              } else {
+                hasInversion = Boolean(auditRes.hasInversion ?? true);
+              }
               diagLog.info(
                 "AI 语义复核",
-                `[${rule.langName}] ${req.id} 经 AI 语义核对确认意思准确（含语序倒装/句式差异，已放行）`,
+                `[${rule.langName}] ${req.id} 经 AI 语义核对确认意思准确（${softWarningReason || "含语序倒装/句式差异"}，已放行）`,
               );
             }
 
@@ -1623,6 +1666,7 @@ export async function batchSplitTargetsWithAi(
               usedAi: true,
               failed: false,
               hasInversion,
+              ...(softWarningReason ? { softWarningReason } : {}),
             });
             aiHits += 1;
           } else {
