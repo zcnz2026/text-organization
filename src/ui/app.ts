@@ -1,4 +1,5 @@
 import { hostBridge } from "../platform/bridge";
+import { diagLog } from "../platform/diag-log";
 import { checkForUpdates, isVersionDismissed } from "../platform/updater";
 import { mountAuthDialogs } from "./auth-dialogs";
 import { mountCatalogConfigDialog } from "./catalog-config-dialog";
@@ -66,6 +67,131 @@ function installDialogLightDismissFallback(root: HTMLElement): void {
       if (pressedOutside && isOutside(e, dlg)) dlg.close();
     });
   });
+}
+
+function escHtml(s: string): string {
+  return (s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function formatLocalHms(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso.slice(11, 19);
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    const ss = String(d.getSeconds()).padStart(2, "0");
+    return `${hh}:${mm}:${ss}`;
+  } catch {
+    return iso.slice(11, 19);
+  }
+}
+
+function mountLiveProcessLogInRail(railContainer: HTMLElement): void {
+  const aside = railContainer.querySelector<HTMLElement>("aside.setup-rail");
+  if (!aside) return;
+
+  let panel = aside.querySelector<HTMLElement>("#live-process-log-panel");
+  let wasNearBottom = true;
+  let prevScrollTop = 0;
+  const openDetailIndices = new Set<number>();
+
+  if (panel) {
+    const prevStream = panel.querySelector<HTMLElement>("#live-log-stream");
+    if (prevStream) {
+      prevScrollTop = prevStream.scrollTop;
+      wasNearBottom =
+        prevStream.scrollHeight - prevStream.scrollTop - prevStream.clientHeight <= 36;
+      prevStream.querySelectorAll<HTMLDetailsElement>("details[data-log-idx]").forEach((det) => {
+        if (det.open) openDetailIndices.add(Number(det.dataset.logIdx));
+      });
+    }
+  } else {
+    panel = document.createElement("section");
+    panel.id = "live-process-log-panel";
+    panel.className = "live-log-panel";
+    panel.setAttribute("aria-label", "运行过程日志");
+    aside.append(panel);
+  }
+
+  const entries = diagLog.getEntries();
+  const itemsHtml =
+    entries.length === 0
+      ? `<div class="live-log-empty">点击上方「开始提取」后，此处将实时显示单篇定位、AI 换 Key 分句与双语核对过程。</div>`
+      : entries
+          .map((entry, idx) => {
+            const lvlCls =
+              entry.level === "ERROR"
+                ? "live-log-lvl-error"
+                : entry.level === "WARN"
+                  ? "live-log-lvl-warn"
+                  : "live-log-lvl-info";
+            const isOpen = openDetailIndices.has(idx) ? " open" : "";
+            const detailHtml = entry.detail
+              ? `<details class="live-log-detail" data-log-idx="${idx}"${isOpen}><summary>查看比对详情</summary><pre>${escHtml(entry.detail)}</pre></details>`
+              : "";
+            return `
+              <div class="live-log-item">
+                <div class="live-log-line">
+                  <span class="live-log-time">${escHtml(formatLocalHms(entry.time))}</span>
+                  <span class="live-log-lvl ${lvlCls}">${escHtml(entry.level)}</span>
+                  <span class="live-log-msg"><span class="live-log-mod">[${escHtml(entry.module)}]</span>${escHtml(entry.message)}</span>
+                </div>
+                ${detailHtml}
+              </div>
+            `;
+          })
+          .join("");
+
+  panel.innerHTML = `
+    <div class="live-log-header">
+      <div class="live-log-title-wrap">
+        <span class="live-log-title">运行过程日志</span>
+        <span class="settings-status-pill pill-muted">${entries.length}</span>
+      </div>
+      <div class="live-log-actions">
+        <button type="button" id="btn-live-log-copy" class="seg-option" ${entries.length === 0 ? "disabled" : ""}>复制</button>
+        <button type="button" id="btn-live-log-export" class="seg-option" ${entries.length === 0 ? "disabled" : ""}>导出</button>
+        <button type="button" id="btn-live-log-clear" class="seg-option" ${entries.length === 0 ? "disabled" : ""}>清空</button>
+      </div>
+    </div>
+    <div id="live-log-stream" class="live-log-stream" role="log" aria-live="polite">
+      ${itemsHtml}
+    </div>
+  `;
+
+  const stream = panel.querySelector<HTMLElement>("#live-log-stream");
+  if (stream) {
+    if (wasNearBottom) {
+      stream.scrollTop = stream.scrollHeight;
+    } else {
+      stream.scrollTop = prevScrollTop;
+    }
+  }
+
+  const copyBtn = panel.querySelector<HTMLButtonElement>("#btn-live-log-copy");
+  copyBtn?.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(diagLog.exportText());
+      copyBtn.textContent = "已复制";
+      setTimeout(() => {
+        if (copyBtn.isConnected) copyBtn.textContent = "复制";
+      }, 1500);
+    } catch {
+      diagLog.downloadLogFile();
+    }
+  });
+
+  panel
+    .querySelector("#btn-live-log-export")
+    ?.addEventListener("click", () => diagLog.downloadLogFile());
+
+  panel
+    .querySelector("#btn-live-log-clear")
+    ?.addEventListener("click", () => diagLog.clear());
 }
 
 export async function mountWorkbenchApp(appRoot: HTMLElement): Promise<void> {
@@ -193,6 +319,7 @@ export async function mountWorkbenchApp(appRoot: HTMLElement): Promise<void> {
         onSyncReviewedCloud: () => void syncReviewedSheetsToCloud(),
         onExportXlsx: exportCurrentRunsXlsx,
       });
+      mountLiveProcessLogInRail(slotRail);
       renderPreviewStage(slotStage);
     } else {
       if (store.lineBreak.workbook) {
@@ -253,6 +380,11 @@ export async function mountWorkbenchApp(appRoot: HTMLElement): Promise<void> {
   };
 
   subscribeState(renderAll);
+  diagLog.subscribe(() => {
+    if (store.activeMainTab === "extract") {
+      mountLiveProcessLogInRail(slotRail);
+    }
+  });
   renderAll();
   void restoreSavedBatchQueueOnBoot();
 

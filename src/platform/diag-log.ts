@@ -8,15 +8,27 @@ export interface DiagLogEntry {
   detail?: string;
 }
 
-const MAX_ENTRIES = 200;
+const MAX_ENTRIES = 500;
 const entries: DiagLogEntry[] = [];
+const listeners = new Set<() => void>();
+
+function notifyListeners(): void {
+  for (const fn of listeners) {
+    try {
+      fn();
+    } catch {
+      // listener errors must never break logging
+    }
+  }
+}
 
 export function sanitizeLogText(raw: string): string {
   return String(raw || "")
     .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]")
     .replace(/\bya29\.[A-Za-z0-9._-]+/g, "[REDACTED_TOKEN]")
     .replace(/\bAIza[0-9A-Za-z_-]{20,}/g, "[REDACTED_API_KEY]")
-    .slice(0, 1800);
+    .replace(/\bAQ\.[0-9A-Za-z._-]{20,}/g, "[REDACTED_API_KEY]")
+    .slice(0, 3200);
 }
 
 function push(level: DiagLogEntry["level"], module: string, message: string, detail?: string): void {
@@ -29,6 +41,8 @@ function push(level: DiagLogEntry["level"], module: string, message: string, det
   };
   entries.push(entry);
   if (entries.length > MAX_ENTRIES) entries.shift();
+
+  notifyListeners();
 
   const line = `[${entry.time}] [${entry.level}] [${entry.module}] ${entry.message}${entry.detail ? ` | ${entry.detail}` : ""}`;
   hostBridge.appendDiagLog(line).catch(() => {
@@ -48,6 +62,16 @@ export const diagLog = {
   },
   getEntries(): readonly DiagLogEntry[] {
     return entries;
+  },
+  clear(): void {
+    entries.length = 0;
+    notifyListeners();
+  },
+  subscribe(listener: () => void): () => void {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
   },
   exportText(): string {
     if (entries.length === 0) return "暂无运行诊断日志。";

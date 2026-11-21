@@ -146,15 +146,13 @@
 }
 
 .rail-cta-footer {
-  position: sticky;
-  inset-block-end: 0;
   background-color: var(--bg-surface);
-  padding-block: 0.65rem 0.9rem;
+  padding-block: 0.65rem 0.6rem;
   border-block-start: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
-  z-index: 2;
+  flex-shrink: 0;
 }
 
 .section-heading {

@@ -1,5 +1,6 @@
 import type { GeminiPoolClient } from "../ai/gemini-client";
 import type { ArticleParagraph, LanguageCatalog } from "../catalog/catalog-types";
+import { diagLog } from "../platform/diag-log";
 import type {
   ExtractionTask,
   LanguageRunOutput,
@@ -143,6 +144,11 @@ export async function runLanguageExtractionPipeline(
   const deferredSplits: DeferredAiSplit[] = [];
   const postBatchHooks: Array<() => void> = [];
 
+  diagLog.info(
+    "提取流水线",
+    `[${catalog.langName}] 开始处理剧本（共 ${script.rows.length} 行，识别出 ${tasks.length} 个提取任务）`,
+  );
+
   const ensureManuscript = async (docUrl: string): Promise<ArticleParagraph[]> => {
     if (!docUrl) return [];
     const cached = catalog.articleDocsCache.get(docUrl);
@@ -160,6 +166,10 @@ export async function runLanguageExtractionPipeline(
   }
 
   if (deferredSplits.length > 0) {
+    diagLog.info(
+      "AI 批量分句",
+      `[${catalog.langName}] 提交 ${deferredSplits.length} 个多行/局部块进行 AI 语义分句与双语核对...`,
+    );
     options.onProgress?.(tasks.length, tasks.length + 1, `AI 语义对齐分句与双语复核 (${deferredSplits.length} 块)...`);
     const batchMap = await batchSplitTargetsWithAi(
       deferredSplits.map((d) => d.req),
@@ -189,6 +199,10 @@ export async function runLanguageExtractionPipeline(
     else if (r.status === "warning") warningCount += 1;
     else if (r.status === "missing") missingCount += 1;
   }
+  diagLog.info(
+    "提取完成",
+    `[${catalog.langName}] 提取结束：精准命中 ${matchedCount} 行，需留意 ${warningCount} 行，留空待处理 ${missingCount} 行`,
+  );
   return { langName: catalog.langName, rows: results, matchedCount, warningCount, missingCount };
 }
 
@@ -628,6 +642,7 @@ async function extractFromArticleManuscript(
   const article = findArticleInCatalog(catalog.articles, task.sourceHint, nextRow?.chinese ?? "", nextRow?.english ?? "");
 
   if (!article) {
+    diagLog.warn("单篇定位", `[${catalog.langName}] 目录中未找到篇目：${task.sourceHint}`);
     for (const idx of task.rowIndices) {
       results[idx].targetLanguage = "";
       results[idx].status = "missing";
@@ -665,6 +680,11 @@ async function extractFromArticleManuscript(
   }
 
   if (locatedBySeg.every((loc) => !loc)) {
+    const firstLineNo = rows[task.rowIndices[0]]?.line || String(task.rowIndices[0] + 1);
+    diagLog.warn(
+      "单篇定位",
+      `[${catalog.langName}] 单篇《${article.zhTitle}》中未定位到对应段落（起始行 Line ${firstLineNo}）`,
+    );
     for (const idx of task.rowIndices) {
       results[idx].targetLanguage = "";
       results[idx].status = "missing";
@@ -672,6 +692,13 @@ async function extractFromArticleManuscript(
     }
     return;
   }
+
+  const firstLineNo = rows[task.rowIndices[0]]?.line || String(task.rowIndices[0] + 1);
+  const lastLineNo = rows[task.rowIndices[task.rowIndices.length - 1]]?.line || String(task.rowIndices[task.rowIndices.length - 1] + 1);
+  diagLog.info(
+    "单篇定位",
+    `[${catalog.langName}] 已定位单篇《${article.zhTitle}》段落（Line ${firstLineNo}~${lastLineNo}，共 ${task.rowIndices.length} 行 / ${subSegments.length} 个子段）`,
+  );
 
   const unquotedByRowIndex = new Map<number, string>();
   let pendingSegments = 0;
