@@ -77,3 +77,52 @@ jobs:
           includeUpdaterJson: true
           args: ${{ matrix.args }}
           uploadArtifacts: true
+
+  publish-updater-json:
+    name: Generate & Upload Signed latest.json
+    needs: build-tauri
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Build and attach latest.json from signed release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          mkdir -p /tmp/sigs
+          gh release download "$TAG_NAME" --repo "$REPO" --pattern "*.sig" --dir /tmp/sigs --clobber
+          ASSETS_JSON=$(gh release view "$TAG_NAME" --repo "$REPO" --json assets,body,publishedAt)
+          TAG_NAME="$TAG_NAME" REPO="$REPO" ASSETS_JSON="$ASSETS_JSON" node -e '
+            const fs = require("fs");
+            const path = require("path");
+            const meta = JSON.parse(process.env.ASSETS_JSON);
+            const ver = process.env.TAG_NAME.replace(/^v/i, "");
+            const findAsset = (re) => meta.assets.find((a) => re.test(a.name));
+            const winExe = findAsset(/x64-setup\.exe$/i);
+            const winSigFile = fs.readdirSync("/tmp/sigs").find((f) => /x64-setup\.exe\.sig$/i.test(f));
+            const macTar = findAsset(/\.app\.tar\.gz$/i);
+            const macSigFile = fs.readdirSync("/tmp/sigs").find((f) => /\.app\.tar\.gz\.sig$/i.test(f));
+            const platforms = {};
+            if (winExe && winSigFile) {
+              platforms["windows-x86_64"] = {
+                signature: fs.readFileSync(path.join("/tmp/sigs", winSigFile), "utf8").trim(),
+                url: winExe.url,
+              };
+            }
+            if (macTar && macSigFile) {
+              const sig = fs.readFileSync(path.join("/tmp/sigs", macSigFile), "utf8").trim();
+              platforms["darwin-aarch64"] = { signature: sig, url: macTar.url };
+              platforms["darwin-x86_64"] = { signature: sig, url: macTar.url };
+            }
+            const out = {
+              version: ver,
+              notes: (meta.body || "").trim(),
+              pub_date: meta.publishedAt || new Date().toISOString(),
+              platforms,
+            };
+            fs.writeFileSync("/tmp/latest.json", JSON.stringify(out, null, 2), "utf8");
+          '
+          gh release upload "$TAG_NAME" /tmp/latest.json --repo "$REPO" --clobber
