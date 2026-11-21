@@ -52,7 +52,7 @@ function alignAmenExclamation(line: string, srcRow: ScriptRow): string {
   return line.replace(/[.。]$/u, "!");
 }
 
-function formatSplitFailureHint(split: SplitResult | undefined, hasKeys: boolean): string {
+export function formatAiFailureHint(split: SplitResult | undefined, hasKeys: boolean): string {
   const rawReason = (split?.errorReason || "").trim();
   if (!hasKeys || !split || /未配置.*密钥/i.test(rawReason)) {
     return "未配置可用 AI 密钥（已留空，不强制估算）：请添加 Gemini Key 后重跑";
@@ -60,13 +60,14 @@ function formatSplitFailureHint(split: SplitResult | undefined, hasKeys: boolean
   if (/500|额度|配额|上限|quota/i.test(rawReason)) {
     return "AI 密钥今日额度已用尽（已留空，不强制估算）：请补充新 Key 或明日重跑";
   }
-  if (/双语核对/i.test(rawReason)) {
-    const cleanReason = rawReason.replace(/^双语核对未通过[：:\s]*/, "").trim() || rawReason;
-    return `AI 分句未通过严格双语核对（${cleanReason}，已留空）：请人工核对或重跑`;
+  if (/HTTP\s+\d{3}|密钥池全部不可用|API_KEY|network|fetch|超时|timeout/i.test(rawReason)) {
+    return `AI 接口请求异常（${rawReason}，已留空，不强制估算）：请检查密钥池或补充额度后重跑`;
   }
-  const fallbackReason = rawReason || "API 调用或行数校验未通过";
-  return `AI 分句失败（${fallbackReason}，已留空，不强制估算）：请检查密钥池后重跑`;
+  const cleanReason = rawReason.replace(/^双语核对未通过[：:\s]*/, "").trim() || "行间语义或行数未对齐";
+  return `AI 分句未通过严格双语核对（经多轮换 Key 重试仍未通过双语核对：${cleanReason}，已留空）：请人工核对`;
 }
+
+const formatSplitFailureHint = formatAiFailureHint;
 
 export async function splitLordsPrayerFullText(
   fullText: string,
@@ -305,7 +306,7 @@ async function processSingleTask(
             k === blockRows.length - 1 ? alignAmenExclamation(rawL, blockRows[k]) : rawL;
           results[rIdx].status = "matched";
           if (k === 0 && split.hasInversion) {
-            results[rIdx].hint = "含倒装句，已保持原语序";
+            results[rIdx].hint = "含语序倒装，已通过 AI 语义核对";
           }
         });
       },
@@ -359,7 +360,7 @@ async function processSingleTask(
         } else {
           results[rIdx].status = "matched";
           if (k === 0 && hasInversion) {
-            results[rIdx].hint = "含倒装句，已保持原语序";
+            results[rIdx].hint = "含语序倒装，已通过 AI 语义核对";
           }
         }
       });
@@ -818,7 +819,7 @@ async function extractFromArticleManuscript(
             results[rIdx].hint = "此处原文中间有省略，请核对省略号衔接";
           } else {
             results[rIdx].status = "matched";
-            results[rIdx].hint = k === 0 && split.hasInversion ? "含倒装句，已保持原语序" : "";
+            results[rIdx].hint = k === 0 && split.hasInversion ? "含语序倒装，已通过 AI 语义核对" : "";
           }
         });
       },

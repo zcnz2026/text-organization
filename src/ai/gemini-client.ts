@@ -21,12 +21,17 @@ export interface GeminiCallInput {
   jsonSchema: Record<string, unknown>;
 }
 
+export interface GeminiCallOptions {
+  preferAlternateKey?: boolean;
+}
+
 export interface GeminiClientOptions {
   apiKeys: string[];
   model: GeminiModelId;
   rotation: KeyRotationStrategy;
   fetchFn?: typeof fetch;
   retryDelayMs?: number;
+  timeoutMs?: number;
 }
 
 export interface KeyConnectivityReport {
@@ -64,9 +69,11 @@ export class GeminiPoolClient {
   private model: GeminiModelId;
   private rotation: KeyRotationStrategy;
   private cursor = 0;
+  private lastUsedKey: string | null = null;
   private fetchFn: typeof fetch;
   private isCustomFetch: boolean;
   private retryDelayMs?: number;
+  private timeoutMs: number;
 
   constructor(opts: GeminiClientOptions) {
     this.keys = opts.apiKeys.map((k) => k.trim()).filter(Boolean);
@@ -74,6 +81,7 @@ export class GeminiPoolClient {
     this.rotation = opts.rotation;
     this.isCustomFetch = Boolean(opts.fetchFn);
     this.retryDelayMs = opts.retryDelayMs;
+    this.timeoutMs = opts.timeoutMs ?? 45000;
     this.fetchFn = opts.fetchFn
       ? (input, init) => opts.fetchFn!(input, init)
       : (input, init) => globalThis.fetch(input, init);
@@ -83,7 +91,14 @@ export class GeminiPoolClient {
     return this.keys.length > 0;
   }
 
-  async generateStructuredJson<T>(input: GeminiCallInput): Promise<T> {
+  get keyCount(): number {
+    return this.keys.length;
+  }
+
+  async generateStructuredJson<T>(
+    input: GeminiCallInput,
+    callOpts?: GeminiCallOptions,
+  ): Promise<T> {
     if (this.keys.length === 0) {
       throw new GeminiPoolExhaustedError(
         "未配置 Gemini API Key，请在右上角「设置 → API 密钥池」中添加密钥",
@@ -92,7 +107,6 @@ export class GeminiPoolClient {
       );
     }
 
-    // Up to 3 rounds when transient 429 RPM / 503 burst occurs across keys
     const maxRounds = 3;
     let lastErr: unknown = null;
     let lastStatus: number | undefined;
@@ -116,8 +130,16 @@ export class GeminiPoolClient {
         break;
       }
 
-      const start =
-        this.rotation === "round_robin" ? this.cursor++ % pool.length : 0;
+      let start = 0;
+      if (this.rotation === "round_robin") {
+        start = this.cursor++ % pool.length;
+        if (callOpts?.preferAlternateKey && pool.length > 1 && pool[start] === this.lastUsedKey) {
+          start = this.cursor++ % pool.length;
+        }
+      } else if (callOpts?.preferAlternateKey && pool.length > 1) {
+        const lastIdx = this.lastUsedKey ? pool.indexOf(this.lastUsedKey) : -1;
+        start = lastIdx >= 0 ? (lastIdx + 1) % pool.length : ++this.cursor % pool.length;
+      }
 
       let sawTransientRateLimit = false;
 
@@ -125,6 +147,7 @@ export class GeminiPoolClient {
         const key = pool[(start + attempt) % pool.length];
         if (this.deadKeys.has(key) && validNotOverLimit.length > 0) continue;
 
+        this.lastUsedKey = key;
         const t0 = Date.now();
         try {
           const val = await this.callSingleKey<T>(key, input);
@@ -145,7 +168,12 @@ export class GeminiPoolClient {
             /API_KEY_INVALID|API key not valid|requires billing/i.test(msg)
           ) {
             this.deadKeys.add(key);
-          } else if (code === 429 || code === 503) {
+          } else if (
+            code === 429 ||
+            code === 503 ||
+            code === 504 ||
+            /超时|timeout|aborted/i.test(msg)
+          ) {
             if (!isKeyOverDailyLimit(key)) {
               sawTransientRateLimit = true;
             }
@@ -157,7 +185,6 @@ export class GeminiPoolClient {
         break;
       }
 
-      // Wait for per-minute RPM bucket (15 req/min) to recover before next round
       const waitMs =
         this.retryDelayMs !== undefined
           ? this.retryDelayMs
@@ -264,11 +291,35 @@ export class GeminiPoolClient {
     };
 
     const callEndpoint = async (endpoint: string, headers: Record<string, string>) => {
-      const resp = await this.fetchFn(endpoint, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-      });
+      const controller =
+        typeof AbortController !== "undefined" ? new AbortController() : null;
+      const timer = controller
+        ? setTimeout(
+            () => controller.abort(new Error(`Gemini 请求超时 (${this.timeoutMs}ms)`)),
+            this.timeoutMs,
+          )
+        : null;
+      let resp: Response;
+      try {
+        resp = await this.fetchFn(endpoint, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+          ...(controller ? { signal: controller.signal } : {}),
+        });
+      } catch (fetchErr) {
+        if (controller?.signal.aborted) {
+          return {
+            ok: false as const,
+            status: 504,
+            detail: `请求超时 (${this.timeoutMs}ms)`,
+          };
+        }
+        throw fetchErr;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+
       if (!resp.ok) {
         const rawErr = await resp.text().catch(() => "");
         let detail = "";

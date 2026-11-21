@@ -29,6 +29,18 @@ export interface SplitResult {
   errorReason?: string;
 }
 
+export interface BilingualAlignmentAnalysis {
+  hardReason: string | null;
+  softReason: string | null;
+}
+
+export interface SemanticAuditResult {
+  verdict: "accurate" | "fixed" | "unfixable";
+  hasInversion?: boolean;
+  reason: string;
+  fixedLines?: string[];
+}
+
 const DIRECT_BATCH_SCHEMA = {
   type: "object",
   properties: {
@@ -54,6 +66,41 @@ const REVIEW_SINGLE_SCHEMA = {
     lines: { type: "array", items: { type: "string" } },
   },
   required: ["lines"],
+};
+
+const TOKEN_SPANS_SINGLE_SCHEMA = {
+  type: "object",
+  properties: {
+    hasInversion: { type: "boolean" },
+    spans: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          start: { type: "integer" },
+          end: { type: "integer" },
+          cap: { type: "boolean" },
+          ellipsis: { type: "boolean" },
+        },
+        required: ["start", "end"],
+      },
+    },
+  },
+  required: ["spans"],
+};
+
+const SEMANTIC_AUDIT_SCHEMA = {
+  type: "object",
+  properties: {
+    verdict: {
+      type: "string",
+      enum: ["accurate", "fixed", "unfixable"],
+    },
+    hasInversion: { type: "boolean" },
+    reason: { type: "string" },
+    fixedLines: { type: "array", items: { type: "string" } },
+  },
+  required: ["verdict", "reason"],
 };
 
 export function capitalizeFirstLetter(text: string): string {
@@ -153,7 +200,6 @@ export function auditAndRepairBilingualAlignment(
     const m = afterSentenceSplitRe.exec(out[i]);
     if (m) {
       const tailWords = m[2].trim().split(/\s+/);
-      // Only shift short 1..2 word leaked starters (e.g. "Jika", "Mengapa", "Це", "Тільки")
       if (tailWords.length <= 2) {
         out[i] = m[1].trim();
         out[i + 1] = `${m[2].trim()} ${out[i + 1]}`.trim();
@@ -218,25 +264,22 @@ export function auditAndRepairBilingualAlignment(
   return out;
 }
 
-/**
- * Projects AI-returned lines back onto the exact verbatim character stream of `sourceText`
- * so zero words, letters, or punctuation marks can ever be altered or hallucinated by AI!
- */
-export function projectLinesOntoVerbatimSource(
-  sourceText: string,
-  aiLines: string[],
-): string[] | null {
-  const cleanSrc = stripOuterDoubleQuotes(sourceText).replace(/\s+/g, " ").trim();
-  if (!cleanSrc || aiLines.length === 0) return null;
-  if (aiLines.some((l) => !l || !l.trim())) return null;
+interface NormalizedSourceMap {
+  cleanSrc: string;
+  fullNorm: string;
+  normToRawStart: number[];
+  normToRawEnd: number[];
+}
 
-  // Build normalized alphanumeric index -> raw index map on cleanSrc
+function buildNormalizedSourceMap(sourceText: string): NormalizedSourceMap | null {
+  const cleanSrc = stripOuterDoubleQuotes(sourceText).replace(/\s+/g, " ").trim();
+  if (!cleanSrc) return null;
+
   const normChars: string[] = [];
   const normToRawStart: number[] = [];
   const normToRawEnd: number[] = [];
-  const srcCodePoints = [...cleanSrc];
   let rawBytePos = 0;
-  for (const ch of srcCodePoints) {
+  for (const ch of [...cleanSrc]) {
     const nextBytePos = rawBytePos + ch.length;
     const n = ch.normalize("NFKC").toLowerCase();
     if (/[\p{L}\p{N}]/u.test(n)) {
@@ -250,22 +293,20 @@ export function projectLinesOntoVerbatimSource(
   }
   const fullNorm = normChars.join("");
   if (!fullNorm) return null;
+  return { cleanSrc, fullNorm, normToRawStart, normToRawEnd };
+}
 
-  const normStr = (s: string) =>
-    [...s.normalize("NFKC").toLowerCase()].filter((c) => /[\p{L}\p{N}]/u.test(c)).join("");
+function normAlnumStr(s: string): string {
+  return [...(s || "").normalize("NFKC").toLowerCase()]
+    .filter((c) => /[\p{L}\p{N}]/u.test(c))
+    .join("");
+}
 
-  const spansNorm: Array<{ nStart: number; nEnd: number }> = [];
-  let cursor = 0;
-  for (let i = 0; i < aiLines.length; i += 1) {
-    const k = normStr(aiLines[i]);
-    if (!k) return null;
-    const pos = fullNorm.indexOf(k, cursor);
-    if (pos < 0) return null;
-    spansNorm.push({ nStart: pos, nEnd: pos + k.length - 1 });
-    cursor = pos + k.length;
-  }
-
-  // Convert normalized spans back into exact verbatim slices of cleanSrc, preserving trailing punctuation of each line!
+function sliceCleanSourceByNormSpans(
+  map: NormalizedSourceMap,
+  spansNorm: Array<{ nStart: number; nEnd: number }>,
+): string[] | null {
+  const { cleanSrc, normToRawStart, normToRawEnd } = map;
   const verbatimLines: string[] = [];
   const firstRawStart = normToRawStart[spansNorm[0].nStart];
   let blockStart = firstRawStart;
@@ -294,6 +335,268 @@ export function projectLinesOntoVerbatimSource(
   }
 
   return verbatimLines.every((l) => l.length > 0) ? verbatimLines : null;
+}
+
+/**
+ * Projects AI-returned lines back onto the exact verbatim character stream of `sourceText`
+ * via 100% exact alphanumeric substring matching.
+ */
+export function projectLinesOntoVerbatimSource(
+  sourceText: string,
+  aiLines: string[],
+): string[] | null {
+  if (aiLines.length === 0 || aiLines.some((l) => !l || !l.trim())) return null;
+  const map = buildNormalizedSourceMap(sourceText);
+  if (!map) return null;
+
+  const spansNorm: Array<{ nStart: number; nEnd: number }> = [];
+  let cursor = 0;
+  for (let i = 0; i < aiLines.length; i += 1) {
+    const k = normAlnumStr(aiLines[i]);
+    if (!k) return null;
+    const pos = map.fullNorm.indexOf(k, cursor);
+    if (pos < 0) return null;
+    spansNorm.push({ nStart: pos, nEnd: pos + k.length - 1 });
+    cursor = pos + k.length;
+  }
+
+  return sliceCleanSourceByNormSpans(map, spansNorm);
+}
+
+function bigramDiceSimilarity(a: string, b: string): number {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  if (a.length < 2 || b.length < 2) {
+    return a[0] === b[0] ? 1 : 0;
+  }
+  const counts = new Map<string, number>();
+  for (let i = 0; i < a.length - 1; i += 1) {
+    const bg = a.slice(i, i + 2);
+    counts.set(bg, (counts.get(bg) ?? 0) + 1);
+  }
+  let intersection = 0;
+  for (let i = 0; i < b.length - 1; i += 1) {
+    const bg = b.slice(i, i + 2);
+    const c = counts.get(bg) ?? 0;
+    if (c > 0) {
+      intersection += 1;
+      counts.set(bg, c - 1);
+    }
+  }
+  return (2 * intersection) / (a.length - 1 + (b.length - 1));
+}
+
+/**
+ * Resilient boundary-anchor verbatim projector:
+ * When AI makes minor character typos inside a long multi-line block (e.g. 1 mistyped letter in line 14 of 28),
+ * locates each line's start/end boundaries on `cleanSrc` using prefix/suffix anchors of adjacent lines
+ * and slices the 100% original verbatim `cleanSrc` (automatically healing AI typos back to the manuscript text!).
+ */
+export function projectLinesByBoundaryAnchors(
+  sourceText: string,
+  aiLines: string[],
+): string[] | null {
+  const exact = projectLinesOntoVerbatimSource(sourceText, aiLines);
+  if (exact) return exact;
+
+  if (aiLines.length === 0 || aiLines.some((l) => !l || !l.trim())) return null;
+  const map = buildNormalizedSourceMap(sourceText);
+  if (!map) return null;
+  const { cleanSrc, fullNorm, normToRawStart, normToRawEnd } = map;
+
+  const lineNorms = aiLines.map(normAlnumStr);
+  if (lineNorms.some((k) => !k)) return null;
+
+  // Locate block start (nStart of line 0)
+  let curStart = -1;
+  const exact0 = fullNorm.indexOf(lineNorms[0]);
+  if (exact0 >= 0 && exact0 <= Math.max(30, fullNorm.length * 0.35)) {
+    curStart = exact0;
+  } else {
+    for (const pLen of [24, 16, 10, 6, 4]) {
+      if (lineNorms[0].length >= pLen) {
+        const pos = fullNorm.indexOf(lineNorms[0].slice(0, pLen));
+        if (pos >= 0 && pos <= Math.max(30, fullNorm.length * 0.35)) {
+          curStart = pos;
+          break;
+        }
+      }
+    }
+    if (curStart < 0 && lineNorms.length > 1) {
+      // If line 0's start had a typo, anchor from line 1's start minus line 0's length
+      for (const pLen of [24, 16, 10, 6]) {
+        if (lineNorms[1].length >= pLen) {
+          const pos1 = fullNorm.indexOf(lineNorms[1].slice(0, pLen));
+          if (pos1 >= lineNorms[0].length * 0.6) {
+            curStart = Math.max(0, pos1 - lineNorms[0].length);
+            break;
+          }
+        }
+      }
+    }
+    if (curStart < 0) curStart = 0;
+  }
+
+  const isWordBoundaryInRaw = (normIdx: number): boolean => {
+    if (normIdx <= 0 || normIdx >= fullNorm.length) return true;
+    const prevRawEnd = normToRawEnd[normIdx - 1];
+    const nextRawStart = normToRawStart[normIdx];
+    if (nextRawStart <= prevRawEnd) return false;
+    return /[\s,.;:!?。！？，、；：—–\-()"”«»'’]/u.test(cleanSrc.slice(prevRawEnd, nextRawStart));
+  };
+
+  const spansNorm: Array<{ nStart: number; nEnd: number }> = [];
+
+  for (let i = 0; i < lineNorms.length; i += 1) {
+    const curNorm = lineNorms[i];
+    const remainingLines = lineNorms.length - 1 - i;
+
+    if (i === lineNorms.length - 1) {
+      // Last line: find its end in fullNorm
+      let endIdx = -1;
+      const exactLast = fullNorm.indexOf(curNorm, curStart);
+      if (exactLast === curStart) {
+        endIdx = curStart + curNorm.length - 1;
+      } else {
+        const expectedEnd = curStart + curNorm.length;
+        for (const sLen of [24, 16, 10, 6, 4]) {
+          if (curNorm.length >= sLen) {
+            const suffix = curNorm.slice(-sLen);
+            const searchFrom = Math.max(curStart, expectedEnd - sLen - Math.max(12, Math.floor(curNorm.length * 0.35)));
+            const pos = fullNorm.indexOf(suffix, searchFrom);
+            if (pos >= 0 && pos + sLen <= expectedEnd + Math.max(15, Math.floor(curNorm.length * 0.35))) {
+              endIdx = pos + sLen - 1;
+              break;
+            }
+          }
+        }
+        if (endIdx < 0) {
+          endIdx = Math.min(fullNorm.length - 1, curStart + curNorm.length - 1);
+        }
+      }
+      if (endIdx < curStart) return null;
+      const actualSlice = fullNorm.slice(curStart, endIdx + 1);
+      if (bigramDiceSimilarity(actualSlice, curNorm) < 0.65) return null;
+      spansNorm.push({ nStart: curStart, nEnd: endIdx });
+      break;
+    }
+
+    const nextNorm = lineNorms[i + 1];
+    const expectedCut = curStart + curNorm.length;
+
+    // Fast path 1: curNorm matches 100% at curStart AND nextNorm (or its prefix) starts right at expectedCut
+    if (fullNorm.startsWith(curNorm, curStart)) {
+      const checkPrefixLen = Math.min(6, nextNorm.length);
+      if (
+        fullNorm.startsWith(nextNorm.slice(0, checkPrefixLen), expectedCut) ||
+        isWordBoundaryInRaw(expectedCut)
+      ) {
+        spansNorm.push({ nStart: curStart, nEnd: expectedCut - 1 });
+        curStart = expectedCut;
+        continue;
+      }
+    }
+
+    // Search window for the boundary cut index (where line i+1 starts)
+    const radius = Math.max(16, Math.ceil(curNorm.length * 0.45));
+    const minCut = Math.max(curStart + 1, expectedCut - radius);
+    const maxCut = Math.min(fullNorm.length - remainingLines, expectedCut + radius);
+    if (minCut > maxCut) return null;
+
+    const candidateCuts = new Set<number>();
+
+    // Anchor A: exact or prefix match of nextNorm within [minCut, maxCut]
+    for (const pLen of [nextNorm.length, 24, 16, 12, 8, 5, 3]) {
+      if (nextNorm.length < pLen || pLen <= 0) continue;
+      const probe = nextNorm.slice(0, pLen);
+      let pos = fullNorm.indexOf(probe, minCut);
+      while (pos >= 0 && pos <= maxCut) {
+        candidateCuts.add(pos);
+        pos = fullNorm.indexOf(probe, pos + 1);
+      }
+      if (candidateCuts.size > 0 && pLen >= 8) break;
+    }
+
+    // Anchor B: suffix match of curNorm within [minCut, maxCut]
+    for (const sLen of [curNorm.length, 24, 16, 12, 8, 5, 3]) {
+      if (curNorm.length < sLen || sLen <= 0) continue;
+      const probe = curNorm.slice(-sLen);
+      let pos = fullNorm.indexOf(probe, Math.max(curStart, minCut - sLen));
+      while (pos >= 0 && pos + sLen <= maxCut) {
+        const cut = pos + sLen;
+        if (cut >= minCut) candidateCuts.add(cut);
+        pos = fullNorm.indexOf(probe, pos + 1);
+      }
+      if (candidateCuts.size > 0 && sLen >= 8) break;
+    }
+
+    // Anchor C: all word boundaries in cleanSrc near expectedCut
+    for (let c = minCut; c <= maxCut; c += 1) {
+      if (isWordBoundaryInRaw(c)) candidateCuts.add(c);
+    }
+
+    let bestCut = -1;
+    let bestScore = -1e9;
+    for (const cut of candidateCuts) {
+      if (cut <= curStart || cut > fullNorm.length - remainingLines) continue;
+      const leftActual = fullNorm.slice(curStart, cut);
+      const rightPreviewLen = Math.min(nextNorm.length, fullNorm.length - cut, 28);
+      const rightActual = fullNorm.slice(cut, cut + rightPreviewLen);
+      const rightExpected = nextNorm.slice(0, rightPreviewLen);
+
+      const leftSim = bigramDiceSimilarity(leftActual, curNorm);
+      const rightSim = bigramDiceSimilarity(rightActual, rightExpected);
+
+      // Exact prefix/suffix match bonuses
+      let prefixMatchLen = 0;
+      while (
+        prefixMatchLen < rightActual.length &&
+        prefixMatchLen < rightExpected.length &&
+        rightActual[prefixMatchLen] === rightExpected[prefixMatchLen]
+      ) {
+        prefixMatchLen += 1;
+      }
+      let suffixMatchLen = 0;
+      while (
+        suffixMatchLen < leftActual.length &&
+        suffixMatchLen < curNorm.length &&
+        leftActual[leftActual.length - 1 - suffixMatchLen] === curNorm[curNorm.length - 1 - suffixMatchLen]
+      ) {
+        suffixMatchLen += 1;
+      }
+
+      const distPenalty = Math.abs(cut - expectedCut) / Math.max(10, curNorm.length);
+      const wbBonus = isWordBoundaryInRaw(cut) ? 0.35 : -0.4;
+      const score =
+        leftSim * 2.2 +
+        rightSim * 2.5 +
+        Math.min(12, prefixMatchLen) * 0.12 +
+        Math.min(12, suffixMatchLen) * 0.12 +
+        wbBonus -
+        distPenalty * 1.2;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestCut = cut;
+      }
+    }
+
+    if (bestCut <= curStart) return null;
+    const chosenSlice = fullNorm.slice(curStart, bestCut);
+    if (bigramDiceSimilarity(chosenSlice, curNorm) < 0.65) return null;
+
+    spansNorm.push({ nStart: curStart, nEnd: bestCut - 1 });
+    curStart = bestCut;
+  }
+
+  return sliceCleanSourceByNormSpans(map, spansNorm);
+}
+
+export function projectLinesVerbatimResilient(
+  sourceText: string,
+  aiLines: string[],
+): string[] | null {
+  return projectLinesOntoVerbatimSource(sourceText, aiLines) ?? projectLinesByBoundaryAnchors(sourceText, aiLines);
 }
 
 const NO_STANDARD_PUNCT_LANGS = new Set(["th", "lo", "km", "my"]);
@@ -330,21 +633,27 @@ function endsWithCommaOrColonPunct(s: string): boolean {
 }
 
 /**
- * Strict 6-point bilingual structural & completeness validator.
- * Returns `null` when all checks pass, or a descriptive Chinese reason when misaligned.
+ * Separates bilingual alignment checks into:
+ * - `hardReason`: Structural errors (line count, dropped head/tail sentences, question mark mismatch,
+ *   final-row comma truncation, adjacent period/comma swap, multi-row punctuation drift) that can NEVER be waived without fixing.
+ * - `softReason`: Length ratio / share warnings that may result from syntactic inversion or verse structure,
+ *   which can be cleared if the AI semantic referee confirms 1:1 meaning accuracy.
  */
-export function detectBilingualMisalignment(
+export function analyzeBilingualAlignment(
   lines: string[],
   sourceRows: ScriptRow[],
   fullSourceText: string,
   rule: PunctuationRule,
   opts?: { isPartial?: boolean; hasTruncation?: boolean },
-): string | null {
+): BilingualAlignmentAnalysis {
   if (lines.length !== sourceRows.length || lines.length === 0) {
-    return `行数不匹配（返回 ${lines.length} 行，需 ${sourceRows.length} 行）`;
+    return {
+      hardReason: `行数不匹配（返回 ${lines.length} 行，需 ${sourceRows.length} 行）`,
+      softReason: null,
+    };
   }
   if (lines.some((l) => !l || !l.trim())) {
-    return "存在空白切分行";
+    return { hardReason: "存在空白切分行", softReason: null };
   }
 
   const isPartial = Boolean(opts?.isPartial);
@@ -357,24 +666,21 @@ export function detectBilingualMisalignment(
       /(?:…|\.\.\.)["”»'’]*$/u.test((r.english || "").trim()),
   );
 
-  // 1. Completeness / anti-dropped-tail & head check against fullSourceText
-  const normAlnum = (s: string) =>
-    [...stripOuterDoubleQuotes(s || "").normalize("NFKC").toLowerCase()]
-      .filter((c) => /[\p{L}\p{N}]/u.test(c))
-      .join("");
-
-  const fullNorm = normAlnum(fullSourceText);
+  // Hard Check 1: Completeness / anti-dropped-tail & head check against fullSourceText
+  const fullNorm = normAlnumStr(fullSourceText);
   if (fullNorm.length >= 10) {
     let cursor = 0;
     let firstStart = -1;
     let lastEnd = 0;
     let matchedLen = 0;
     for (let i = 0; i < lines.length; i += 1) {
-      const k = normAlnum(lines[i]);
-      if (!k) return `第 ${i + 1} 行缺少有效文字`;
+      const k = normAlnumStr(lines[i]);
+      if (!k) {
+        return { hardReason: `第 ${i + 1} 行缺少有效文字`, softReason: null };
+      }
       const pos = fullNorm.indexOf(k, cursor);
       if (pos < 0) {
-        return `第 ${i + 1} 行内容偏离定稿原文`;
+        return { hardReason: `第 ${i + 1} 行内容偏离定稿原文`, softReason: null };
       }
       if (i === 0) firstStart = pos;
       lastEnd = pos + k.length;
@@ -383,38 +689,53 @@ export function detectBilingualMisalignment(
     }
 
     if (!isPartial && !hasTruncation && firstStart / fullNorm.length > 0.08) {
-      return `句首漏句（仅从定稿原文 ${Math.round((firstStart / fullNorm.length) * 100)}% 处开始）`;
+      return {
+        hardReason: `句首漏句（仅从定稿原文 ${Math.round((firstStart / fullNorm.length) * 100)}% 处开始）`,
+        softReason: null,
+      };
     }
     if (!isPartial && !hasExplicitOmission && lastEnd / fullNorm.length < 0.92) {
-      return `句尾漏句（仅覆盖至定稿原文 ${Math.round((lastEnd / fullNorm.length) * 100)}% 处，遗漏尾部内容）`;
+      return {
+        hardReason: `句尾漏句（仅覆盖至定稿原文 ${Math.round((lastEnd / fullNorm.length) * 100)}% 处，遗漏尾部内容）`,
+        softReason: null,
+      };
     }
     if (!isPartial && !hasTruncation && !hasExplicitOmission && matchedLen / fullNorm.length < 0.92) {
-      return `整段覆盖率不足（仅覆盖定稿原文 ${Math.round((matchedLen / fullNorm.length) * 100)}%）`;
+      return {
+        hardReason: `整段覆盖率不足（仅覆盖定稿原文 ${Math.round((matchedLen / fullNorm.length) * 100)}%）`,
+        softReason: null,
+      };
     }
   }
 
-  // 2. Per-row question mark count equality
+  // Hard Check 2: Per-row question mark count equality
   for (let i = 0; i < lines.length; i += 1) {
     const srcRef = (sourceRows[i]?.english || sourceRows[i]?.chinese || "").trim();
     if (!srcRef) continue;
     const srcQ = countSrcQuestions(srcRef);
     const tgQ = countTargetQuestions(lines[i], rule.langCode);
     if (srcQ !== tgQ) {
-      return `第 ${i + 1} 行问号数量不一致（源文 ${srcQ} 个 vs 目标语 ${tgQ} 个）`;
+      return {
+        hardReason: `第 ${i + 1} 行问号数量不一致（源文 ${srcQ} 个 vs 目标语 ${tgQ} 个）`,
+        softReason: null,
+      };
     }
   }
 
-  // 3. Final row sentence-ending punctuation consistency
+  // Hard Check 3: Final row sentence-ending punctuation consistency
   if (!NO_STANDARD_PUNCT_LANGS.has(rule.langCode)) {
     const lastIdx = lines.length - 1;
     const lastSrc = (sourceRows[lastIdx]?.english || sourceRows[lastIdx]?.chinese || "").trim();
     const lastTg = lines[lastIdx].trim();
     if (endsWithStrongSentencePunct(lastSrc) && endsWithCommaOrColonPunct(lastTg)) {
-      return `第 ${lastIdx + 1} 行（末行）句末标点错位（源文以句号/问号/叹号结束，目标语却以逗号/冒号结束，疑似漏掉末半句）`;
+      return {
+        hardReason: `第 ${lastIdx + 1} 行（末行）句末标点错位（源文以句号/问号/叹号结束，目标语却以逗号/冒号结束，疑似漏掉末半句）`,
+        softReason: null,
+      };
     }
   }
 
-  // 4. Adjacent row period/comma swap & multi-row sentence-end punctuation drift
+  // Hard Check 4: Adjacent row period/comma swap & multi-row sentence-end punctuation drift
   if (!NO_STANDARD_PUNCT_LANGS.has(rule.langCode) && lines.length >= 2) {
     let punctContradictions = 0;
     for (let i = 0; i < lines.length; i += 1) {
@@ -442,16 +763,23 @@ export function detectBilingualMisalignment(
           (srcComma && tgStrong && nextSrcStrong && nextTgComma) ||
           (srcStrong && tgComma && nextSrcComma && nextTgStrong)
         ) {
-          return `第 ${i + 1}~${i + 2} 行句末句号与逗号交叉错位（跨行顺延错行）`;
+          return {
+            hardReason: `第 ${i + 1}~${i + 2} 行句末句号与逗号交叉错位（跨行顺延错行）`,
+            softReason: null,
+          };
         }
       }
     }
     if (punctContradictions >= 2) {
-      return `存在 ${punctContradictions} 行句末句号/逗号与源文矛盾（多行顺延错行）`;
+      return {
+        hardReason: `存在 ${punctContradictions} 行句末句号/逗号与源文矛盾（多行顺延错行）`,
+        softReason: null,
+      };
     }
   }
 
-  // 5. Per-row length share & extreme short/long mismatch
+  // Soft Check 5: Per-row length share & extreme short/long mismatch (may be caused by clause inversion)
+  let softReason: string | null = null;
   if (lines.length >= 2) {
     const stripEllipsisAndQuotes = (s: string) =>
       stripOuterDoubleQuotes((s || "").trim())
@@ -473,10 +801,12 @@ export function detectBilingualMisalignment(
         const tgL = tgLens[i];
 
         if (enL > 0 && enL <= 20 && tgL >= 65) {
-          return `第 ${i + 1} 行长短严重错配（英文仅 ${enL} 字符，目标语长达 ${tgL} 字符）`;
+          softReason = `第 ${i + 1} 行长短差异较大（英文 ${enL} 字符 vs 目标语 ${tgL} 字符）`;
+          break;
         }
         if ((enL >= 15 || zhL >= 6) && tgL <= 3) {
-          return `第 ${i + 1} 行目标语过短（仅 ${tgL} 字符）`;
+          softReason = `第 ${i + 1} 行目标语过短（仅 ${tgL} 字符）`;
+          break;
         }
 
         const srcL = srcLens[i];
@@ -486,33 +816,143 @@ export function detectBilingualMisalignment(
           const tgShare = tgL / totalTg;
           const ratio = tgShare / Math.max(0.015, srcShare);
           if (ratio < 0.35 || ratio > 2.55) {
-            return `第 ${i + 1} 行长度占比失衡（占比比值 ${ratio.toFixed(2)}，疑似跨行错位）`;
+            softReason = `第 ${i + 1} 行长度占比失衡（占比比值 ${ratio.toFixed(2)}，疑似跨行错位或语序倒装）`;
+            break;
           }
         }
       }
     }
   }
 
-  // 6. Whole-block total length ratio check (catches partial blocks that silently drop half the passage)
-  const totalEnChars = sourceRows.reduce(
-    (acc, r) => acc + stripOuterDoubleQuotes((r.english || "").trim()).length,
-    0,
-  );
-  const totalTgChars = lines.reduce(
-    (acc, l) => acc + stripOuterDoubleQuotes((l || "").trim()).length,
-    0,
-  );
-  if (
-    totalEnChars >= 40 &&
-    /[\p{Script=Latin}\p{Script=Cyrillic}\p{Script=Greek}]/u.test(lines.join(""))
-  ) {
-    const blockRatio = totalTgChars / totalEnChars;
-    if (blockRatio < 0.42 || blockRatio > 2.65) {
-      return `整块外文与英文总长比例异常（${totalTgChars}/${totalEnChars} = ${blockRatio.toFixed(2)}，疑似漏句或多摘）`;
+  // Soft Check 6: Whole-block total length ratio check
+  if (!softReason) {
+    const totalEnChars = sourceRows.reduce(
+      (acc, r) => acc + stripOuterDoubleQuotes((r.english || "").trim()).length,
+      0,
+    );
+    const totalTgChars = lines.reduce(
+      (acc, l) => acc + stripOuterDoubleQuotes((l || "").trim()).length,
+      0,
+    );
+    if (
+      totalEnChars >= 40 &&
+      /[\p{Script=Latin}\p{Script=Cyrillic}\p{Script=Greek}]/u.test(lines.join(""))
+    ) {
+      const blockRatio = totalTgChars / totalEnChars;
+      if (blockRatio < 0.42 || blockRatio > 2.65) {
+        softReason = `整块外文与英文总长比例偏离（${totalTgChars}/${totalEnChars} = ${blockRatio.toFixed(2)}）`;
+      }
     }
   }
 
-  return null;
+  return { hardReason: null, softReason };
+}
+
+export function detectBilingualMisalignment(
+  lines: string[],
+  sourceRows: ScriptRow[],
+  fullSourceText: string,
+  rule: PunctuationRule,
+  opts?: { isPartial?: boolean; hasTruncation?: boolean },
+): string | null {
+  const { hardReason, softReason } = analyzeBilingualAlignment(
+    lines,
+    sourceRows,
+    fullSourceText,
+    rule,
+    opts,
+  );
+  return hardReason ?? softReason;
+}
+
+/**
+ * AI Semantic Bilingual Referee & Fixer:
+ * Compares the actual meaning of Chinese, English, and Target language row-by-row (switching to an alternate Key).
+ * - If a soft length warning was caused by legitimate cross-language syntax / clause inversion while row meanings match,
+ *   returns `verdict: "accurate", hasInversion: true`.
+ * - If genuine misalignment or dropped sentences occurred, re-splits from the FULL sourceText and returns `verdict: "fixed", fixedLines`.
+ * - Also backwards-compatible with legacy mocks returning `{ lines: [...] }`.
+ */
+export async function semanticAuditOrFixWithAi(
+  draftLines: string[],
+  sourceText: string,
+  sourceRows: ScriptRow[],
+  rule: PunctuationRule,
+  gemini: GeminiPoolClient,
+  triggerReason = "行间标点或长度占比未对齐",
+  referenceEn?: string,
+): Promise<SemanticAuditResult> {
+  try {
+    const fullCleanSource = stripOuterDoubleQuotes(sourceText).trim();
+    const tableSpec = sourceRows
+      .map(
+        (r, i) =>
+          `[${i + 1}]\n  中文: ${r.chinese}\n  英文: ${r.english}\n  当前外文切分: ${draftLines[i] ?? ""}`,
+      )
+      .join("\n");
+    const refEnBlock = referenceEn ? `原段完整英文参考：\n${referenceEn}\n\n` : "";
+
+    const rawRes = await gemini.generateStructuredJson<{
+      verdict?: "accurate" | "fixed" | "unfixable";
+      hasInversion?: boolean;
+      reason?: string;
+      fixedLines?: string[];
+      lines?: string[];
+    }>(
+      {
+        systemInstruction:
+          "你是多语种剧本三语语义审校与重切裁判。请逐行对比下面每一行的【中文】【英文】与【当前外文切分】的实际语义（不要只看字数长短）：\n" +
+          "1. 若因跨语种句式差异或从句语序倒装导致某行外文字数与英文长短悬殊，但每一行外文表达的意思与该行中英文对应准确、且未遗漏原文句子，请返回 verdict:\"accurate\", hasInversion:true。\n" +
+          "2. 若确实存在跨行顺延错位、问号/句号错位或遗漏了结尾句/开头句，请基于【不可改动的完整外文串】重新 1:1 切分，返回 verdict:\"fixed\" 及严格等于字幕行数的 fixedLines 数组（严禁修改、增删任何外文单词或标点！）。\n" +
+          "3. 若定稿原文与中英文完全对不上无法修复，返回 verdict:\"unfixable\"。",
+        userPrompt:
+          `目标语种：${rule.langName}（共 ${sourceRows.length} 行）\n` +
+          `触发核对原因：${triggerReason}\n` +
+          refEnBlock +
+          `不可改动的完整外文串：\n${fullCleanSource}\n\n` +
+          `逐行三语对照：\n${tableSpec}`,
+        jsonSchema: SEMANTIC_AUDIT_SCHEMA,
+      },
+      { preferAlternateKey: true },
+    );
+
+    const candidateLines =
+      Array.isArray(rawRes.fixedLines) && rawRes.fixedLines.length === sourceRows.length
+        ? rawRes.fixedLines
+        : Array.isArray(rawRes.lines) && rawRes.lines.length === sourceRows.length
+          ? rawRes.lines
+          : undefined;
+
+    if (rawRes.verdict === "accurate" && !candidateLines) {
+      return {
+        verdict: "accurate",
+        hasInversion: Boolean(rawRes.hasInversion ?? true),
+        reason: rawRes.reason || "AI 语义核对通过",
+      };
+    }
+
+    if ((rawRes.verdict === "fixed" || (!rawRes.verdict && candidateLines)) && candidateLines) {
+      const projected = projectLinesVerbatimResilient(sourceText, candidateLines);
+      if (projected) {
+        return {
+          verdict: "fixed",
+          hasInversion: Boolean(rawRes.hasInversion),
+          reason: rawRes.reason || "AI 已按完整原文修正断行",
+          fixedLines: projected,
+        };
+      }
+    }
+
+    return {
+      verdict: "unfixable",
+      reason: rawRes.reason || triggerReason,
+    };
+  } catch (err) {
+    return {
+      verdict: "unfixable",
+      reason: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 export async function reviewAndFixSplitWithAi(
@@ -524,35 +964,17 @@ export async function reviewAndFixSplitWithAi(
   misalignmentReason = "行间标点或长度占比未对齐",
   referenceEn?: string,
 ): Promise<string[] | null> {
-  try {
-    const fullCleanSource = stripOuterDoubleQuotes(sourceText).trim();
-    const tableSpec = sourceRows
-      .map(
-        (r, i) =>
-          `[${i + 1}]\n  中文: ${r.chinese}\n  英文: ${r.english}\n  当前错误切分: ${draftLines[i] ?? ""}`,
-      )
-      .join("\n");
-    const refEnBlock = referenceEn ? `原段完整英文参考：\n${referenceEn}\n\n` : "";
-    const res = await gemini.generateStructuredJson<{ lines: string[] }>({
-      systemInstruction:
-        "你是多语种剧本三语分行校对专家。当前外文切分被检出对齐错误，请基于【不可改动的完整外文串】重新与每一行的【中文】【英文】进行 1:1 严格对齐切分。\n" +
-        "硬性要求：\n" +
-        "1. 严禁修改、增删或调换任何外文单词与标点！所有切分出的行必须连续取自【不可改动的完整外文串】（若上一轮切分提前截断或漏掉了尾部句子，必须从完整外文串中找回补齐！）。\n" +
-        "2. 只调整断行边界：严查句号/逗号错位、连接词（如 and/dan/й/і/та/то/якщо）、多问句同行的跨行错位，修正后返回严格等于字幕行数的 lines 数组。",
-      userPrompt:
-        `目标语种：${rule.langName}（共 ${sourceRows.length} 行）\n` +
-        `检出问题：${misalignmentReason}\n` +
-        refEnBlock +
-        `不可改动的完整外文串：\n${fullCleanSource}\n\n` +
-        `逐行三语对照：\n${tableSpec}`,
-      jsonSchema: REVIEW_SINGLE_SCHEMA,
-    });
-    if (Array.isArray(res.lines) && res.lines.length === sourceRows.length) {
-      return projectLinesOntoVerbatimSource(sourceText, res.lines);
-    }
-  } catch {
-    // ignore review error; caller will re-run detectBilingualMisalignment and reject if still misaligned
-  }
+  const res = await semanticAuditOrFixWithAi(
+    draftLines,
+    sourceText,
+    sourceRows,
+    rule,
+    gemini,
+    misalignmentReason,
+    referenceEn,
+  );
+  if (res.verdict === "fixed" && res.fixedLines) return res.fixedLines;
+  if (res.verdict === "accurate") return draftLines;
   return null;
 }
 
@@ -592,6 +1014,75 @@ export function sliceTokensBySpans(
     out.push(chunk);
   }
   return auditAndRepairBilingualAlignment(out, sourceRows, rule, suppressAutoEllipsis);
+}
+
+/**
+ * Strategy 2: Token-index span splitting (`[0]w0 [1]w1 ... -> { spans: [{start, end}] }`).
+ * Eliminates any possibility of AI spelling/character typos on long 20~30 line blocks
+ * and switches to an alternate API key in the pool.
+ */
+export async function splitByTokenSpansWithAi(
+  preparedSrc: string,
+  sourceRows: ScriptRow[],
+  rule: PunctuationRule,
+  gemini: GeminiPoolClient,
+  opts?: { suppressAutoEllipsis?: boolean; referenceEn?: string; onlyAcceptSpans?: boolean },
+): Promise<{ lines: string[]; hasInversion?: boolean } | null> {
+  const tk = tokenizeForIndexing(preparedSrc);
+  if (tk.tokens.length === 0) return null;
+  const indexedTokens = formatIndexedTokens(tk.tokens);
+  const rowsSpec = sourceRows
+    .map((r, i) => {
+      const tr = parseTruncationSpec(r);
+      const truncNote = tr.deletedEnPrefix
+        ? ` | 【句首已截取删去英文 "${tr.deletedEnPrefix}"】`
+        : "";
+      return `  (${i + 1}) ZH: ${r.chinese} | EN: ${r.english}${truncNote}`;
+    })
+    .join("\n");
+  const refEnLine = opts?.referenceEn ? `原段完整英文参考：\n${opts.referenceEn}\n` : "";
+
+  const res = await gemini.generateStructuredJson<{
+    spans?: TokenSpan[];
+    lines?: string[];
+    hasInversion?: boolean;
+  }>(
+    {
+      systemInstruction:
+        "你是多语种影视剧本文本 1:1 词序号断行专家。下面给出带 `[序号]` 的目标语定稿词序列（从 `[0]` 到 `[N]`）以及需要对齐的中英文字幕行。\n" +
+        "请只输出每一行对应的起止词序号 `{ spans: [{ start, end }] }`（包含 start 与 end 两端词），spans 数组长度必须严格等于字幕行数，且相邻行满足 `next.start = prev.end + 1`，完整覆盖整段台词不漏尾句！",
+      userPrompt:
+        `目标语种：${rule.langName}（共 ${ tk.tokens.length } 个词单元，最后序号 [${tk.tokens.length - 1}]）\n` +
+        refEnLine +
+        `带序号的目标语词序列：\n${indexedTokens}\n\n` +
+        `请严格切分为 ${sourceRows.length} 行（spans 长度必须等于 ${sourceRows.length}）：\n${rowsSpec}`,
+      jsonSchema: TOKEN_SPANS_SINGLE_SCHEMA,
+    },
+    { preferAlternateKey: true },
+  );
+
+  if (Array.isArray(res.spans) && res.spans.length === sourceRows.length) {
+    const sliced = sliceTokensBySpans(
+      tk.tokens,
+      tk.joinSep,
+      res.spans,
+      sourceRows,
+      rule,
+      Boolean(opts?.suppressAutoEllipsis),
+    );
+    if (sliced) {
+      return { lines: sliced, hasInversion: Boolean(res.hasInversion) };
+    }
+  }
+
+  if (!opts?.onlyAcceptSpans && Array.isArray(res.lines) && res.lines.length === sourceRows.length) {
+    const projected = projectLinesVerbatimResilient(preparedSrc, res.lines);
+    if (projected) {
+      return { lines: projected, hasInversion: Boolean(res.hasInversion) };
+    }
+  }
+
+  return null;
 }
 
 export function deterministicSplitLines(
@@ -702,19 +1193,27 @@ export async function batchSplitTargetsWithAi(
     return resultMap;
   }
 
-  // Pack at most 2 blocks (<= 14k chars) per request so Flash-Lite gives maximum per-line precision!
+  // Upgrade B: Dedicated single-block batch whenever sourceRows.length >= 10 or aiSourceText.length >= 1800
   const batches: BatchSplitRequest[][] = [];
   let curBatch: BatchSplitRequest[] = [];
   let curChars = 0;
   for (const req of requests) {
+    const isLongBlock = req.sourceRows.length >= 10 || req.aiSourceText.length >= 1800;
     const est = req.aiSourceText.length + (req.referenceEn?.length ?? 0) + req.sourceRows.length * 140;
-    if (curBatch.length >= 2 || (curBatch.length > 0 && curChars + est > 14000)) {
+    if (isLongBlock || curBatch.length >= 2 || (curBatch.length > 0 && curChars + est > 14000)) {
+      if (curBatch.length > 0) {
+        batches.push(curBatch);
+        curBatch = [];
+        curChars = 0;
+      }
+    }
+    curBatch.push(req);
+    curChars += est;
+    if (isLongBlock) {
       batches.push(curBatch);
       curBatch = [];
       curChars = 0;
     }
-    curBatch.push(req);
-    curChars += est;
   }
   if (curBatch.length > 0) batches.push(curBatch);
 
@@ -754,12 +1253,16 @@ export async function batchSplitTargetsWithAi(
         const item = byId.get(req.id);
         const preparedSrc = encodeThaiDoubleSpaces(req.aiSourceText, rule);
         const hasTruncInReq = req.sourceRows.some((r) => parseTruncationSpec(r).hasTruncation);
+        let hasInversion = Boolean(item?.hasInversion);
+        let usedTokenSpansStrategy = false;
+
+        // Strategy 1: Direct text split + resilient boundary-anchor verbatim projection
         let projected =
           item && Array.isArray(item.lines) && item.lines.length === req.sourceRows.length
-            ? projectLinesOntoVerbatimSource(preparedSrc, item.lines)
+            ? projectLinesVerbatimResilient(preparedSrc, item.lines)
             : null;
 
-        // Backward-compatible fallback if a caller/mock returned token spans instead of lines
+        // Backward-compatible fallback if Pass 1 directly returned token spans
         if (!projected && item && Array.isArray(item.spans)) {
           const tk = tokenizeForIndexing(preparedSrc);
           const spanSliced = sliceTokensBySpans(
@@ -775,30 +1278,79 @@ export async function batchSplitTargetsWithAi(
               lines: spanSliced,
               usedAi: true,
               failed: false,
-              hasInversion: Boolean(item.hasInversion),
+              hasInversion,
             });
             aiHits += 1;
             continue;
           }
         }
 
-        // If batch item returned wrong line count or failed projection, retry this single block once directly
-        let singleRetryErrText = "";
+        // Strategy 2: If Pass 1 returned wrong line count or failed projection, switch Key & retry via Token-Index Spans (`[0]w0 [1]w1 ...`)
+        let retryErrText = "";
+        if (!projected) {
+          usedTokenSpansStrategy = true;
+          try {
+            const spanRes = await splitByTokenSpansWithAi(
+              preparedSrc,
+              req.sourceRows,
+              rule,
+              gemini,
+              {
+                suppressAutoEllipsis: req.suppressAutoEllipsis,
+                referenceEn: req.referenceEn,
+              },
+            );
+            if (spanRes) {
+              projected = spanRes.lines;
+              if (spanRes.hasInversion) hasInversion = true;
+              diagLog.info(
+                "AI 换 Key 词序号重试成功",
+                `[${rule.langName}] 任务 ${req.id} 经第 2 轮词序号索引模式 (${req.sourceRows.length} 行) 对齐成功`,
+              );
+            }
+          } catch (spanErr) {
+            retryErrText = spanErr instanceof Error ? spanErr.message : String(spanErr);
+          }
+        }
+
+        // Strategy 3: If Strategy 2 still didn't yield projected lines, switch Key & retry single-block text split
         if (!projected) {
           try {
             const singleRowsSpec = req.sourceRows
               .map((r, idx) => `(${idx + 1}) ZH: ${r.chinese} | EN: ${r.english}`)
               .join("\n");
-            const singleRes = await gemini.generateStructuredJson<{ lines: string[] }>({
-              systemInstruction: DIRECT_SPLIT_SYSTEM_PROMPT,
-              userPrompt: `目标语种：${rule.langName}\n目标语定稿原文：\n${stripOuterDoubleQuotes(preparedSrc)}\n请严格切分为 ${req.sourceRows.length} 行（lines 数组长度必须等于 ${req.sourceRows.length}）：\n${singleRowsSpec}`,
-              jsonSchema: REVIEW_SINGLE_SCHEMA,
-            });
+            const singleRes = await gemini.generateStructuredJson<{
+              lines?: string[];
+              spans?: TokenSpan[];
+              hasInversion?: boolean;
+            }>(
+              {
+                systemInstruction: DIRECT_SPLIT_SYSTEM_PROMPT,
+                userPrompt:
+                  `目标语种：${rule.langName}\n` +
+                  `注意：上一轮返回了 ${item?.lines?.length ?? 0} 行，必须严格切分为 ${req.sourceRows.length} 行！\n` +
+                  `目标语定稿原文：\n${stripOuterDoubleQuotes(preparedSrc)}\n` +
+                  `请严格按以下 ${req.sourceRows.length} 行 1:1 切分：\n${singleRowsSpec}`,
+                jsonSchema: REVIEW_SINGLE_SCHEMA,
+              },
+              { preferAlternateKey: true },
+            );
             if (Array.isArray(singleRes.lines) && singleRes.lines.length === req.sourceRows.length) {
-              projected = projectLinesOntoVerbatimSource(preparedSrc, singleRes.lines);
+              projected = projectLinesVerbatimResilient(preparedSrc, singleRes.lines);
+              if (singleRes.hasInversion) hasInversion = true;
+            } else if (Array.isArray(singleRes.spans) && singleRes.spans.length === req.sourceRows.length) {
+              const tk = tokenizeForIndexing(preparedSrc);
+              projected = sliceTokensBySpans(
+                tk.tokens,
+                tk.joinSep,
+                singleRes.spans,
+                req.sourceRows,
+                rule,
+                Boolean(req.suppressAutoEllipsis),
+              );
             }
-          } catch (retryErr) {
-            singleRetryErrText = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          } catch (singleErr) {
+            retryErrText = singleErr instanceof Error ? singleErr.message : String(singleErr);
           }
         }
 
@@ -815,7 +1367,7 @@ export async function batchSplitTargetsWithAi(
             isPartial: Boolean(req.isPartial),
             hasTruncation: hasTruncInReq,
           };
-          let misalignReason = detectBilingualMisalignment(
+          let analysis = analyzeBilingualAlignment(
             decoded,
             req.sourceRows,
             preparedSrc,
@@ -823,57 +1375,115 @@ export async function batchSplitTargetsWithAi(
             alignOpts,
           );
 
-          // Closed-Loop Self-Review: pass the FULL preparedSrc (never truncated draftLines) + specific reason
-          if (misalignReason !== null) {
-            const reviewed = await reviewAndFixSplitWithAi(
+          let passedAlignment = analysis.hardReason === null && analysis.softReason === null;
+
+          // Upgrade C: When either hardReason or softReason triggers, invoke AI Semantic Referee (on alternate Key)
+          if (!passedAlignment) {
+            const triggerReason = (analysis.hardReason ?? analysis.softReason)!;
+            const auditRes = await semanticAuditOrFixWithAi(
               decoded,
               preparedSrc,
               req.sourceRows,
               rule,
               gemini,
-              misalignReason,
+              triggerReason,
               req.referenceEn,
             );
-            if (reviewed) {
-              decoded = auditAndRepairBilingualAlignment(
-                reviewed.map((l) => decodeThaiDoubleSpaces(l, rule)),
+
+            if (auditRes.verdict === "fixed" && auditRes.fixedLines) {
+              const repaired = auditAndRepairBilingualAlignment(
+                auditRes.fixedLines.map((l) => decodeThaiDoubleSpaces(l, rule)),
                 req.sourceRows,
                 rule,
                 Boolean(req.suppressAutoEllipsis),
               );
-              misalignReason = detectBilingualMisalignment(
-                decoded,
+              const recheck = analyzeBilingualAlignment(
+                repaired,
                 req.sourceRows,
                 preparedSrc,
                 rule,
                 alignOpts,
               );
+              if (recheck.hardReason === null) {
+                decoded = repaired;
+                analysis = recheck;
+                passedAlignment = true;
+                if (auditRes.hasInversion) hasInversion = true;
+              } else {
+                analysis = recheck;
+              }
+            } else if (auditRes.verdict === "accurate" && analysis.hardReason === null) {
+              // Only softReason (length share skew from clause inversion / verse syntax) was present,
+              // and AI semantic comparison confirmed row meanings match accurately!
+              passedAlignment = true;
+              hasInversion = Boolean(auditRes.hasInversion ?? true);
+            }
+
+            // Last-chance rescue for genuine hard structural errors if token-span mode hasn't been tried yet
+            if (!passedAlignment && analysis.hardReason !== null && !usedTokenSpansStrategy) {
+              try {
+                const rescueSpanRes = await splitByTokenSpansWithAi(
+                  preparedSrc,
+                  req.sourceRows,
+                  rule,
+                  gemini,
+                  {
+                    suppressAutoEllipsis: req.suppressAutoEllipsis,
+                    referenceEn: req.referenceEn,
+                    onlyAcceptSpans: true,
+                  },
+                );
+                if (rescueSpanRes) {
+                  const rescueLines = auditAndRepairBilingualAlignment(
+                    rescueSpanRes.lines.map((l) => decodeThaiDoubleSpaces(l, rule)),
+                    req.sourceRows,
+                    rule,
+                    Boolean(req.suppressAutoEllipsis),
+                  );
+                  const rescueCheck = analyzeBilingualAlignment(
+                    rescueLines,
+                    req.sourceRows,
+                    preparedSrc,
+                    rule,
+                    alignOpts,
+                  );
+                  if (rescueCheck.hardReason === null) {
+                    decoded = rescueLines;
+                    analysis = rescueCheck;
+                    passedAlignment = true;
+                    if (rescueSpanRes.hasInversion) hasInversion = true;
+                  }
+                }
+              } catch {
+                // ignore rescue error
+              }
             }
           }
 
-          if (misalignReason === null) {
+          if (passedAlignment) {
             resultMap.set(req.id, {
               lines: decoded,
               usedAi: true,
               failed: false,
-              hasInversion: Boolean(item?.hasInversion),
+              hasInversion,
             });
             aiHits += 1;
           } else {
+            const finalFailReason = (analysis.hardReason ?? analysis.softReason) || "行间语义未对齐";
             diagLog.warn(
               "AI 分句双语核对未通过",
-              `[${rule.langName}] 任务 ${req.id} (${misalignReason})，已按宁缺毋滥原则留空`,
+              `[${rule.langName}] 任务 ${req.id} (${finalFailReason})，已按宁缺毋滥原则留空`,
             );
             resultMap.set(req.id, {
               lines: [],
               usedAi: false,
               failed: true,
-              errorReason: `双语核对未通过：${misalignReason}`,
+              errorReason: `双语核对未通过：${finalFailReason}`,
             });
           }
         } else {
-          const reason = singleRetryErrText
-            ? singleRetryErrText.slice(0, 120)
+          const reason = retryErrText
+            ? retryErrText.slice(0, 120)
             : `AI 返回 ${item?.lines?.length ?? 0} 行（需 ${req.sourceRows.length} 行），未过行数/原文逐字校验`;
           diagLog.warn(
             "AI 分句校验未通过",
