@@ -66,11 +66,14 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "文字整理工具 ${{ github.ref_name }}"
-          releaseBody: "支持 Windows (.exe/.msi) 与 macOS (.dmg/.app) 双平台原生桌面版。"
+          releaseBody: "支持 Windows (.exe/.msi) 与 macOS (.dmg/.app) 双平台原生桌面版（已启用 Ed25519 数字签名安全应用内自动更新）。"
           releaseDraft: false
           prerelease: false
+          includeUpdaterJson: true
           args: ${{ matrix.args }}
           uploadArtifacts: true
