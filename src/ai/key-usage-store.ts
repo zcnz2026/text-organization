@@ -110,12 +110,17 @@ function ensureRecord(data: PersistedDailyUsage, fp: string): PerKeyDailyRecord 
   return data.byFingerprint[fp];
 }
 
-export function recordKeyCallSuccess(apiKey: string, latencyMs?: number): void {
+export function recordKeyCallSuccess(
+  apiKey: string,
+  latencyMs?: number,
+  paidUnlimited = false,
+): void {
   const data = loadStore();
   const rec = ensureRecord(data, keyFingerprint(apiKey));
   rec.callsToday += 1;
   rec.successToday += 1;
-  rec.lastStatus = rec.callsToday >= DAILY_KEY_QUOTA_LIMIT ? "quota_full" : "ok";
+  rec.lastStatus =
+    !paidUnlimited && rec.callsToday >= DAILY_KEY_QUOTA_LIMIT ? "quota_full" : "ok";
   rec.lastError = undefined;
   if (latencyMs !== undefined) rec.lastLatencyMs = Math.max(1, Math.round(latencyMs));
   rec.updatedAt = Date.now();
@@ -126,6 +131,7 @@ export function recordKeyCallFailure(
   apiKey: string,
   httpStatus: number | undefined,
   errorDetail: string,
+  paidUnlimited = false,
 ): void {
   const data = loadStore();
   const rec = ensureRecord(data, keyFingerprint(apiKey));
@@ -139,7 +145,9 @@ export function recordKeyCallFailure(
       : `HTTP ${httpStatus || 403} 密钥无效或无权限`;
   } else if (httpStatus === 429) {
     rec.callsToday += 1;
-    const isDailyExhausted = /per\s*day|daily|GenerateRequestsPerDay/i.test(shortErr) || rec.callsToday >= DAILY_KEY_QUOTA_LIMIT;
+    const isDailyExhausted =
+      /per\s*day|daily|GenerateRequestsPerDay/i.test(shortErr) ||
+      (!paidUnlimited && rec.callsToday >= DAILY_KEY_QUOTA_LIMIT);
     rec.lastStatus = isDailyExhausted ? "quota_full" : "rate_limited";
     rec.lastError = isDailyExhausted
       ? "HTTP 429 今日配额已满"
@@ -152,25 +160,39 @@ export function recordKeyCallFailure(
   saveStore(data);
 }
 
-export function isKeyOverDailyLimit(apiKey: string): boolean {
+export function isKeyOverDailyLimit(apiKey: string, paidUnlimited = false): boolean {
   const data = loadStore();
   const rec = data.byFingerprint[keyFingerprint(apiKey)];
   if (!rec) return false;
+  if (paidUnlimited) {
+    return (
+      rec.lastStatus === "quota_full" &&
+      Boolean(rec.lastError && /HTTP 429 今日配额已满|per\s*day|daily/i.test(rec.lastError))
+    );
+  }
   return rec.callsToday >= DAILY_KEY_QUOTA_LIMIT || rec.lastStatus === "quota_full";
 }
 
-export function getKeyUsageView(apiKey: string): KeyUsageView {
+export function getKeyUsageView(apiKey: string, paidUnlimited = false): KeyUsageView {
   const data = loadStore();
   const fp = keyFingerprint(apiKey);
   const rec = data.byFingerprint[fp];
   const callsToday = rec?.callsToday ?? 0;
+  let lastStatus: KeyHealthStatus = rec?.lastStatus ?? "untested";
+  if (
+    paidUnlimited &&
+    lastStatus === "quota_full" &&
+    !(rec?.lastError && /HTTP 429 今日配额已满|per\s*day|daily/i.test(rec.lastError))
+  ) {
+    lastStatus = "ok";
+  }
   return {
     fingerprint: fp,
     callsToday,
     successToday: rec?.successToday ?? 0,
     limit: DAILY_KEY_QUOTA_LIMIT,
-    remaining: Math.max(0, DAILY_KEY_QUOTA_LIMIT - callsToday),
-    lastStatus: rec?.lastStatus ?? "untested",
+    remaining: paidUnlimited ? 999999 : Math.max(0, DAILY_KEY_QUOTA_LIMIT - callsToday),
+    lastStatus,
     lastError: rec?.lastError,
     lastLatencyMs: rec?.lastLatencyMs,
   };
@@ -179,10 +201,12 @@ export function getKeyUsageView(apiKey: string): KeyUsageView {
 export function getTotalTodayCallsSummary(
   keyCount: number,
   activeKeys?: string[],
+  paidUnlimited = false,
 ): {
   totalCallsToday: number;
   totalCapacity: number;
   day: string;
+  paidUnlimited: boolean;
 } {
   const data = loadStore();
   const totalCallsToday = activeKeys
@@ -198,6 +222,7 @@ export function getTotalTodayCallsSummary(
     totalCallsToday,
     totalCapacity: Math.max(0, activeKeys ? activeKeys.length : keyCount) * DAILY_KEY_QUOTA_LIMIT,
     day: data.day,
+    paidUnlimited: Boolean(paidUnlimited),
   };
 }
 

@@ -11,8 +11,38 @@ export const SUPPORTED_GEMINI_MODELS: Array<{
   id: GeminiModelId;
   label: string;
 }> = [
-  { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash Lite（默认）" },
-  { id: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite" },
+  {
+    id: "gemini-3.8-flash",
+    label: "Gemini 3.8 Flash（强烈推荐 · 高智商高速，付费/Vertex 首选）",
+  },
+  {
+    id: "gemini-2.5-pro",
+    label: "Gemini 2.5 Pro（Vertex 旗舰稳定版 · 复杂长句/倒装极准）",
+  },
+  {
+    id: "gemini-3.1-pro-preview",
+    label: "Gemini 3.1 Pro Preview（高阶深度推理 · 疑难审校极强）",
+  },
+  {
+    id: "gemini-4-argon",
+    label: "Gemini 4 Argon（最新一代旗舰大模型）",
+  },
+  {
+    id: "gemini-3.6-flash",
+    label: "Gemini 3.6 Flash（稳定高准度）",
+  },
+  {
+    id: "gemini-2.5-flash",
+    label: "Gemini 2.5 Flash（Vertex 经典高速版）",
+  },
+  {
+    id: "gemini-3.5-flash-lite",
+    label: "Gemini 3.5 Flash Lite（轻量省流版 · 免费 Key 默认）",
+  },
+  {
+    id: "gemini-3.1-flash-lite",
+    label: "Gemini 3.1 Flash Lite（轻量备用版）",
+  },
 ];
 
 export interface GeminiCallInput {
@@ -23,11 +53,15 @@ export interface GeminiCallInput {
 
 export interface GeminiCallOptions {
   preferAlternateKey?: boolean;
+  useReviewModel?: boolean;
+  modelOverride?: string;
 }
 
 export interface GeminiClientOptions {
   apiKeys: string[];
   model: GeminiModelId;
+  reviewModel?: GeminiModelId;
+  paidUnlimited?: boolean;
   rotation: KeyRotationStrategy;
   fetchFn?: typeof fetch;
   retryDelayMs?: number;
@@ -51,6 +85,13 @@ function maskKeyShort(k: string): string {
   return `${s.slice(0, 6)}...${s.slice(-4)}`;
 }
 
+function defaultTimeoutForModel(modelId: string): number {
+  const m = (modelId || "").toLowerCase();
+  if (m.includes("pro") || m.includes("argon")) return 90000;
+  if (m.includes("flash") && !m.includes("lite")) return 60000;
+  return 45000;
+}
+
 export class GeminiPoolExhaustedError extends Error {
   readonly status?: number;
   readonly isKeyOrQuotaError: boolean;
@@ -67,21 +108,25 @@ export class GeminiPoolClient {
   private keys: string[];
   private deadKeys = new Set<string>();
   private model: GeminiModelId;
+  private reviewModel?: GeminiModelId;
+  private paidUnlimited: boolean;
   private rotation: KeyRotationStrategy;
   private cursor = 0;
   private lastUsedKey: string | null = null;
   private fetchFn: typeof fetch;
   private isCustomFetch: boolean;
   private retryDelayMs?: number;
-  private timeoutMs: number;
+  private explicitTimeoutMs?: number;
 
   constructor(opts: GeminiClientOptions) {
     this.keys = opts.apiKeys.map((k) => k.trim()).filter(Boolean);
-    this.model = opts.model;
+    this.model = (opts.model || "gemini-3.8-flash").trim() || "gemini-3.8-flash";
+    this.reviewModel = opts.reviewModel?.trim() || undefined;
+    this.paidUnlimited = Boolean(opts.paidUnlimited);
     this.rotation = opts.rotation;
     this.isCustomFetch = Boolean(opts.fetchFn);
     this.retryDelayMs = opts.retryDelayMs;
-    this.timeoutMs = opts.timeoutMs ?? 45000;
+    this.explicitTimeoutMs = opts.timeoutMs;
     this.fetchFn = opts.fetchFn
       ? (input, init) => opts.fetchFn!(input, init)
       : (input, init) => globalThis.fetch(input, init);
@@ -93,6 +138,29 @@ export class GeminiPoolClient {
 
   get keyCount(): number {
     return this.keys.length;
+  }
+
+  get isPaidUnlimited(): boolean {
+    return this.paidUnlimited;
+  }
+
+  get primaryModel(): GeminiModelId {
+    return this.model;
+  }
+
+  get activeReviewModel(): GeminiModelId {
+    return this.reviewModel || this.model;
+  }
+
+  private resolveTargetModel(callOpts?: GeminiCallOptions): string {
+    if (callOpts?.modelOverride?.trim()) return callOpts.modelOverride.trim();
+    if (callOpts?.useReviewModel && this.reviewModel) return this.reviewModel;
+    return this.model;
+  }
+
+  private resolveTimeoutMs(targetModel: string): number {
+    if (this.explicitTimeoutMs !== undefined) return this.explicitTimeoutMs;
+    return defaultTimeoutForModel(targetModel);
   }
 
   async generateStructuredJson<T>(
@@ -107,19 +175,20 @@ export class GeminiPoolClient {
       );
     }
 
+    const targetModel = this.resolveTargetModel(callOpts);
     const maxRounds = 3;
     let lastErr: unknown = null;
     let lastStatus: number | undefined;
 
     for (let round = 0; round < maxRounds; round += 1) {
       const validNotOverLimit = this.keys.filter(
-        (k) => !this.deadKeys.has(k) && !isKeyOverDailyLimit(k),
+        (k) => !this.deadKeys.has(k) && !isKeyOverDailyLimit(k, this.paidUnlimited),
       );
       const validAny = this.keys.filter((k) => !this.deadKeys.has(k));
 
       if (validNotOverLimit.length === 0 && validAny.length > 0) {
         throw new GeminiPoolExhaustedError(
-          `所有可用 API Key 今日调用均已达 ${DAILY_KEY_QUOTA_LIMIT} 次上限，请新增密钥或明日自动重置`,
+          `所有可用 API Key 今日调用均已达 ${DAILY_KEY_QUOTA_LIMIT} 次上限，请新增密钥、开启付费不限额模式或明日自动重置`,
           429,
           true,
         );
@@ -150,8 +219,8 @@ export class GeminiPoolClient {
         this.lastUsedKey = key;
         const t0 = Date.now();
         try {
-          const val = await this.callSingleKey<T>(key, input);
-          recordKeyCallSuccess(key, Date.now() - t0);
+          const val = await this.callSingleKey<T>(key, input, targetModel);
+          recordKeyCallSuccess(key, Date.now() - t0, this.paidUnlimited);
           return val;
         } catch (err) {
           lastErr = err;
@@ -160,7 +229,7 @@ export class GeminiPoolClient {
           const code = stMatch ? Number(stMatch[1]) : undefined;
           lastStatus = code;
 
-          recordKeyCallFailure(key, code, msg);
+          recordKeyCallFailure(key, code, msg, this.paidUnlimited);
 
           if (
             code === 401 ||
@@ -174,7 +243,7 @@ export class GeminiPoolClient {
             code === 504 ||
             /超时|timeout|aborted/i.test(msg)
           ) {
-            if (!isKeyOverDailyLimit(key)) {
+            if (!isKeyOverDailyLimit(key, this.paidUnlimited)) {
               sawTransientRateLimit = true;
             }
           }
@@ -228,17 +297,17 @@ export class GeminiPoolClient {
       const t0 = Date.now();
       let report: KeyConnectivityReport;
       try {
-        await this.callSingleKey<{ ok: boolean }>(key, pingInput);
+        await this.callSingleKey<{ ok: boolean }>(key, pingInput, this.model);
         const latencyMs = Math.max(1, Date.now() - t0);
-        recordKeyCallSuccess(key, latencyMs);
-        const usage = getKeyUsageView(key);
+        recordKeyCallSuccess(key, latencyMs, this.paidUnlimited);
+        const usage = getKeyUsageView(key, this.paidUnlimited);
         report = {
           index: i,
           maskedKey: maskKeyShort(key),
           ok: true,
           status: 200,
           latencyMs,
-          detail: `可用 (${latencyMs}ms)`,
+          detail: `可用 · ${this.model} (${latencyMs}ms)`,
           callsToday: usage.callsToday,
           limit: usage.limit,
         };
@@ -247,8 +316,8 @@ export class GeminiPoolClient {
         const msg = err instanceof Error ? err.message : String(err);
         const stMatch = /HTTP\s+(\d{3})/.exec(msg);
         const code = stMatch ? Number(stMatch[1]) : undefined;
-        recordKeyCallFailure(key, code, msg);
-        const usage = getKeyUsageView(key);
+        recordKeyCallFailure(key, code, msg, this.paidUnlimited);
+        const usage = getKeyUsageView(key, this.paidUnlimited);
         report = {
           index: i,
           maskedKey: maskKeyShort(key),
@@ -270,9 +339,12 @@ export class GeminiPoolClient {
   private async callSingleKey<T>(
     apiKey: string,
     input: GeminiCallInput,
+    targetModel = this.model,
   ): Promise<T> {
     const isVertexKey = apiKey.startsWith("AQ.");
-    const body = {
+    const activeTimeoutMs = this.resolveTimeoutMs(targetModel);
+
+    const buildBody = (maxTokens: number) => ({
       systemInstruction: {
         parts: [{ text: input.systemInstruction }],
       },
@@ -284,19 +356,23 @@ export class GeminiPoolClient {
       ],
       generationConfig: {
         temperature: 0.1,
-        maxOutputTokens: 8192,
+        maxOutputTokens: maxTokens,
         responseMimeType: "application/json",
         responseSchema: input.jsonSchema,
       },
-    };
+    });
 
-    const callEndpoint = async (endpoint: string, headers: Record<string, string>) => {
+    const callEndpointOnce = async (
+      endpoint: string,
+      headers: Record<string, string>,
+      maxTokens: number,
+    ) => {
       const controller =
         typeof AbortController !== "undefined" ? new AbortController() : null;
       const timer = controller
         ? setTimeout(
-            () => controller.abort(new Error(`Gemini 请求超时 (${this.timeoutMs}ms)`)),
-            this.timeoutMs,
+            () => controller.abort(new Error(`Gemini 请求超时 (${activeTimeoutMs}ms)`)),
+            activeTimeoutMs,
           )
         : null;
       let resp: Response;
@@ -304,7 +380,7 @@ export class GeminiPoolClient {
         resp = await this.fetchFn(endpoint, {
           method: "POST",
           headers,
-          body: JSON.stringify(body),
+          body: JSON.stringify(buildBody(maxTokens)),
           ...(controller ? { signal: controller.signal } : {}),
         });
       } catch (fetchErr) {
@@ -312,7 +388,7 @@ export class GeminiPoolClient {
           return {
             ok: false as const,
             status: 504,
-            detail: `请求超时 (${this.timeoutMs}ms)`,
+            detail: `请求超时 (${activeTimeoutMs}ms)`,
           };
         }
         throw fetchErr;
@@ -344,8 +420,24 @@ export class GeminiPoolClient {
       return { ok: true as const, value: JSON.parse(rawText) as T };
     };
 
-    const aiStudioUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`;
-    const vertexUrl = `https://aiplatform.googleapis.com/v1/publishers/google/models/${encodeURIComponent(this.model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const callEndpoint = async (endpoint: string, headers: Record<string, string>) => {
+      const first = await callEndpointOnce(endpoint, headers, 16384);
+      if (first.ok) return first;
+      if (
+        first.status === 400 &&
+        /max_output_tokens|maxOutputTokens|invalid argument|token/i.test(first.detail || "token")
+      ) {
+        const fallback8k = await callEndpointOnce(endpoint, headers, 8192);
+        if (fallback8k.ok) return fallback8k;
+      }
+      return first;
+    };
+
+    const encModel = encodeURIComponent(targetModel);
+    const encKey = encodeURIComponent(apiKey);
+    const aiStudioUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encModel}:generateContent`;
+    const vertexV1Url = `https://aiplatform.googleapis.com/v1/publishers/google/models/${encModel}:generateContent?key=${encKey}`;
+    const vertexBetaUrl = `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/${encModel}:generateContent?key=${encKey}`;
 
     if (!isVertexKey) {
       const r = await callEndpoint(aiStudioUrl, {
@@ -353,22 +445,35 @@ export class GeminiPoolClient {
         "x-goog-api-key": apiKey,
       });
       if (r.ok) return r.value;
+      if (r.status === 404) {
+        const vBeta = await callEndpoint(vertexBetaUrl, { "Content-Type": "application/json" });
+        if (vBeta.ok) return vBeta.value;
+      }
       throw new Error(`Gemini HTTP ${r.status}${r.detail ? `: ${r.detail}` : ""}`);
     }
 
-    const vRes = await callEndpoint(vertexUrl, { "Content-Type": "application/json" });
-    if (vRes.ok) return vRes.value;
-    if (vRes.status === 403 || vRes.status === 404) {
+    const v1Res = await callEndpoint(vertexV1Url, { "Content-Type": "application/json" });
+    if (v1Res.ok) return v1Res.value;
+
+    let lastVertexRes = v1Res;
+    if (v1Res.status === 404 || v1Res.status === 400) {
+      const vBetaRes = await callEndpoint(vertexBetaUrl, { "Content-Type": "application/json" });
+      if (vBetaRes.ok) return vBetaRes.value;
+      lastVertexRes = vBetaRes;
+    }
+
+    if (lastVertexRes.status === 403 || lastVertexRes.status === 404) {
       const sRes = await callEndpoint(aiStudioUrl, {
         "Content-Type": "application/json",
         "x-goog-api-key": apiKey,
       });
       if (sRes.ok) return sRes.value;
     }
+
     const hint =
-      /requires billing/i.test(vRes.detail)
+      /requires billing/i.test(lastVertexRes.detail)
         ? "（该 AQ. 密钥属于 Vertex AI，需开启 Google Cloud 结算；若要免费使用 Gemini Flash Lite，请改用 Google AI Studio 生成的 AIza... 密钥）"
         : "";
-    throw new Error(`Gemini HTTP ${vRes.status}: ${vRes.detail}${hint}`);
+    throw new Error(`Gemini HTTP ${lastVertexRes.status}: ${lastVertexRes.detail}${hint}`);
   }
 }

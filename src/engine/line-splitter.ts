@@ -1124,7 +1124,7 @@ export async function semanticAuditOrFixWithAi(
           `逐行三语对照：\n${tableSpec}`,
         jsonSchema: SEMANTIC_AUDIT_SCHEMA,
       },
-      { preferAlternateKey: true },
+      { preferAlternateKey: true, useReviewModel: true },
     );
 
     const rowAudits = Array.isArray(rawRes.rowAudits) ? rawRes.rowAudits : undefined;
@@ -1295,12 +1295,17 @@ export async function splitByTokenSpansWithAi(
     .join("\n");
   const refEnLine = opts?.referenceEn ? `原段完整英文参考：\n${opts.referenceEn}\n` : "";
 
+  const copulaRule =
+    "\n【双语系动词/谓语边界对齐规则】：当中文行与英文行在行末系动词/谓语切分点略有差异时（例如中文写「所谓‘XX’」而把「就是」放在下一行，英文写「'XX' means」把谓语留在当前行），拉丁/斯拉夫/日耳曼等西文语系请优先对齐英文语法边界（将 significa / means / bedeutet / означає 等系动词留在当前行），避免产生孤立名词行。";
+
   const systemInstruction = isPartialOrOmittedTail
     ? "你是多语种影视剧本文本 1:1 词序号断行专家。下面给出带 `[序号]` 的目标语定稿词序列以及需要对齐的中英文字幕行。\n" +
       "请只输出每一行对应的起止词序号 `{ spans: [{ start, end }] }`（包含 start 与 end 两端词），spans 数组长度必须严格等于字幕行数，且相邻行满足 `next.start = prev.end + 1`。\n" +
-      `【重要：本块为长段局部摘录/末行含省略号】定稿原文开头或结尾包含未出现在字幕行中的被省略句子！请只切分与下方 (1)~(${sourceRows.length}) 行语义严格对应的连续区间，到第 ${sourceRows.length} 行语义结束处立刻停止，严禁把后面被省略的多余句子（如后续问句）塞进第 ${sourceRows.length} 行！`
+      `【重要：本块为长段局部摘录/末行含省略号】定稿原文开头或结尾包含未出现在字幕行中的被省略句子！请只切分与下方 (1)~(${sourceRows.length}) 行语义严格对应的连续区间，到第 ${sourceRows.length} 行语义结束处立刻停止，严禁把后面被省略的多余句子（如后续问句）塞进第 ${sourceRows.length} 行！` +
+      copulaRule
     : "你是多语种影视剧本文本 1:1 词序号断行专家。下面给出带 `[序号]` 的目标语定稿词序列（从 `[0]` 到 `[N]`）以及需要对齐的中英文字幕行。\n" +
-      "请只输出每一行对应的起止词序号 `{ spans: [{ start, end }] }`（包含 start 与 end 两端词），spans 数组长度必须严格等于字幕行数，且相邻行满足 `next.start = prev.end + 1`，完整覆盖整段台词不漏尾句！";
+      "请只输出每一行对应的起止词序号 `{ spans: [{ start, end }] }`（包含 start 与 end 两端词），spans 数组长度必须严格等于字幕行数，且相邻行满足 `next.start = prev.end + 1`，完整覆盖整段台词不漏尾句！" +
+      copulaRule;
 
   const userHeader = isPartialOrOmittedTail
     ? `目标语种：${rule.langName}（共 ${tk.tokens.length} 个词单元 · 局部摘录/末行有省略，请在第 ${sourceRows.length} 行语义结束处停止，切勿包含后续被省略句子）\n`
@@ -1320,7 +1325,7 @@ export async function splitByTokenSpansWithAi(
         `请严格切分为 ${sourceRows.length} 行（spans 长度必须等于 ${sourceRows.length}）：\n${rowsSpec}`,
       jsonSchema: TOKEN_SPANS_SINGLE_SCHEMA,
     },
-    { preferAlternateKey: true },
+    { preferAlternateKey: true, useReviewModel: true },
   );
 
   if (Array.isArray(res.spans) && res.spans.length === sourceRows.length) {
@@ -1535,7 +1540,7 @@ export async function splitBySentenceCheckpointsWithAi(
                 `请严格按以下 ${grp.rows.length} 行 1:1 切分：\n${subSpec}`,
               jsonSchema: REVIEW_SINGLE_SCHEMA,
             },
-            { preferAlternateKey: true },
+            { preferAlternateKey: true, useReviewModel: true },
           );
           if (Array.isArray(subRes.lines) && subRes.lines.length === grp.rows.length) {
             grpLines = projectLinesVerbatimResilient(chunkText, subRes.lines);
@@ -1660,6 +1665,7 @@ const DIRECT_SPLIT_SYSTEM_PROMPT =
   "   - 若某行英文以句号结束，目标语该行也必须在对应完整句句号处结束，绝不能在句中逗号处提前截断导致后续所有行顺延错位或丢掉结尾句！\n" +
   "   - 若某行英文包含问号（?），目标语该行必须包含相同数量的问号，绝不能把问句拆到其他行！\n" +
   "   - 下一行英文以连词/引导词（and, or, if, so, rather, when, although 等）开头时，目标语对应的连词（如 dan/atau/jika/й/і/та/то/якщо/радше 等）必须放在下一行行首，绝不能留在上一行行末！\n" +
+  "   - 当中文行与英文行在行末系动词/谓语切分点略有差异时（例如中文写「所谓‘XX’」而把「就是」放在下一行，英文写「'XX' means」把谓语留在当前行），拉丁/斯拉夫/日耳曼等西文语系请优先对齐英文语法边界（将 significa / means / bedeutet / означає 等系动词留在当前行），避免产生孤立名词行。\n" +
   "4. 泰语中的 @ 代表双空格断句符，切分时保留 @ 不得删除。";
 
 function buildMisalignmentDiagDetail(
@@ -1898,7 +1904,7 @@ export async function batchSplitTargetsWithAi(
                   `请严格按以下 ${req.sourceRows.length} 行 1:1 切分：\n${singleRowsSpec}`,
                 jsonSchema: REVIEW_SINGLE_SCHEMA,
               },
-              { preferAlternateKey: true },
+              { preferAlternateKey: true, useReviewModel: true },
             );
             if (Array.isArray(singleRes.lines) && singleRes.lines.length === req.sourceRows.length) {
               projected = projectLinesVerbatimResilient(preparedSrc, singleRes.lines, {

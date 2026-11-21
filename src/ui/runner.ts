@@ -188,7 +188,15 @@ export async function runMultiLanguageExtraction(): Promise<void> {
     let gemini: GeminiPoolClient | undefined;
     if (store.geminiEnabled && store.geminiSummary.count > 0) {
       const keys = await hostBridge.getPlainGeminiKeys();
-      if (keys.length > 0) gemini = new GeminiPoolClient({ apiKeys: keys, model: store.geminiModel, rotation: store.geminiRotation });
+      if (keys.length > 0) {
+        gemini = new GeminiPoolClient({
+          apiKeys: keys,
+          model: store.geminiModel,
+          rotation: store.geminiRotation,
+          reviewModel: store.geminiReviewModel || undefined,
+          paidUnlimited: store.geminiPaidUnlimited,
+        });
+      }
     }
     let totalMatched = 0;
     let totalMissing = 0;

@@ -46,13 +46,24 @@ export function mountSettingsDialog(
         : "尚未配置 OAuth 凭据";
 
     const keyCount = store.geminiSummary.count;
-    const modelLabel =
-      SUPPORTED_GEMINI_MODELS.find((m) => m.id === store.geminiModel)?.label ??
-      store.geminiModel;
-    const quotaSum = getTotalTodayCallsSummary(keyCount);
+    const presetFound = SUPPORTED_GEMINI_MODELS.find((m) => m.id === store.geminiModel);
+    const modelLabel = presetFound
+      ? presetFound.label
+      : `${store.geminiModel}（自定义模型）`;
+    const reviewSuffix = store.geminiReviewModel
+      ? ` · 疑难复核升级 ${store.geminiReviewModel}`
+      : "";
+    const quotaSum = getTotalTodayCallsSummary(
+      keyCount,
+      undefined,
+      store.geminiPaidUnlimited,
+    );
+    const quotaLabel = store.geminiPaidUnlimited
+      ? `今日已调用 ${quotaSum.totalCallsToday} 次（付费不限额）`
+      : `今日已调用 ${quotaSum.totalCallsToday} / ${quotaSum.totalCapacity} 次`;
     const geminiStatusText =
       keyCount > 0
-        ? `已配置 ${keyCount} 个密钥 · 今日已调用 ${quotaSum.totalCallsToday} / ${quotaSum.totalCapacity} 次 · ${modelLabel}${store.geminiEnabled ? "" : "（已暂停）"}`
+        ? `已配置 ${keyCount} 个密钥 · ${quotaLabel} · ${modelLabel}${reviewSuffix}${store.geminiEnabled ? "" : "（已暂停）"}`
         : "尚未配置 Gemini API Key";
 
     const cfgCount = store.linksByLang.size;

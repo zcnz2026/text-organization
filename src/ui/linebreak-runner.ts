@@ -255,6 +255,8 @@ export async function executeSubtitleLineBreak(): Promise<void> {
             apiKeys: plainKeys,
             model: store.geminiModel,
             rotation: store.geminiRotation,
+            reviewModel: store.geminiReviewModel || undefined,
+            paidUnlimited: store.geminiPaidUnlimited,
           });
         }
       } catch {

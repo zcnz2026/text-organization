@@ -155,6 +155,8 @@ export interface AppState {
   auth: OAuthSessionInfo;
   geminiSummary: { count: number; maskedKeys: string[] };
   geminiModel: GeminiModelId;
+  geminiReviewModel: string;
+  geminiPaidUnlimited: boolean;
   geminiRotation: KeyRotationStrategy;
   geminiEnabled: boolean;
   availableLanguages: string[];
@@ -261,17 +263,27 @@ function loadCustomRules(): PunctuationRule[] {
 function loadAiPrefs(): {
   enabled: boolean;
   model: GeminiModelId;
+  reviewModel: string;
+  paidUnlimited: boolean;
   rotation: KeyRotationStrategy;
 } {
   try {
     const raw = localStorage.getItem(AI_SETTINGS_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as { enabled?: boolean; model?: string; rotation?: KeyRotationStrategy };
-      const model: GeminiModelId =
-        parsed.model === "gemini-3.1-flash-lite" ? "gemini-3.1-flash-lite" : "gemini-3.5-flash-lite";
+      const parsed = JSON.parse(raw) as {
+        enabled?: boolean;
+        model?: string;
+        reviewModel?: string;
+        paidUnlimited?: boolean;
+        rotation?: KeyRotationStrategy;
+      };
+      const rawModel = typeof parsed.model === "string" ? parsed.model.trim() : "";
+      const model: GeminiModelId = rawModel || "gemini-3.8-flash";
       return {
         enabled: parsed.enabled ?? true,
         model,
+        reviewModel: typeof parsed.reviewModel === "string" ? parsed.reviewModel.trim() : "",
+        paidUnlimited: Boolean(parsed.paidUnlimited),
         rotation: parsed.rotation === "failover" ? "failover" : "round_robin",
       };
     }
@@ -280,7 +292,9 @@ function loadAiPrefs(): {
   }
   return {
     enabled: true,
-    model: "gemini-3.5-flash-lite",
+    model: "gemini-3.8-flash",
+    reviewModel: "",
+    paidUnlimited: false,
     rotation: "round_robin",
   };
 }
@@ -366,6 +380,8 @@ export const store: AppState = {
   },
   geminiSummary: { count: 0, maskedKeys: [] },
   geminiModel: aiPrefs.model,
+  geminiReviewModel: aiPrefs.reviewModel,
+  geminiPaidUnlimited: aiPrefs.paidUnlimited,
   geminiRotation: aiPrefs.rotation,
   geminiEnabled: aiPrefs.enabled,
   availableLanguages: schemaBundle.availableLanguages,
@@ -438,6 +454,8 @@ export function notifyStateChanged(): void {
       JSON.stringify({
         enabled: store.geminiEnabled,
         model: store.geminiModel,
+        reviewModel: store.geminiReviewModel,
+        paidUnlimited: store.geminiPaidUnlimited,
         rotation: store.geminiRotation,
       }),
     );

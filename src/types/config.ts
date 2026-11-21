@@ -1,6 +1,4 @@
-export type GeminiModelId =
-  | "gemini-3.5-flash-lite"
-  | "gemini-3.1-flash-lite";
+export type GeminiModelId = string;
 
 export type KeyRotationStrategy = "round_robin" | "failover";
 
@@ -22,6 +20,8 @@ export interface OAuthSessionInfo {
 export interface GeminiPoolConfig {
   enabled: boolean;
   model: GeminiModelId;
+  reviewModel?: string;
+  paidUnlimited?: boolean;
   rotation: KeyRotationStrategy;
   keyCount: number;
   maskedKeys: string[];

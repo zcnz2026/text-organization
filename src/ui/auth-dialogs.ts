@@ -19,6 +19,13 @@ function esc(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
+const REVIEW_MODEL_OPTIONS: Array<{ id: string; label: string }> = [
+  { id: "", label: "与主模型一致（主模型已选 Pro / 3.8 Flash 时推荐）" },
+  { id: "gemini-2.5-pro", label: "自动升级至 Gemini 2.5 Pro（日常高速 + 疑难块旗舰审校）" },
+  { id: "gemini-3.1-pro-preview", label: "自动升级至 Gemini 3.1 Pro Preview" },
+  { id: "gemini-4-argon", label: "自动升级至 Gemini 4 Argon" },
+];
+
 function renderKeyHealthBadge(view: KeyUsageView): string {
   switch (view.lastStatus) {
     case "ok": {
@@ -40,7 +47,10 @@ function renderKeyHealthBadge(view: KeyUsageView): string {
   }
 }
 
-function renderKeyQuotaBadge(view: KeyUsageView): string {
+function renderKeyQuotaBadge(view: KeyUsageView, paidUnlimited: boolean): string {
+  if (paidUnlimited) {
+    return `<span class="settings-status-pill pill-info">今日 ${view.callsToday} 次</span>`;
+  }
   const cls =
     view.callsToday >= view.limit
       ? "pill-err"
@@ -73,6 +83,7 @@ export function mountAuthDialogs(root: HTMLElement): {
   }
 
   let geminiRenderSeq = 0;
+  let forceCustomModelInput = false;
 
   const renderOAuthContent = (statusMsg = "", isErr = false) => {
     const a = store.auth;
@@ -199,9 +210,10 @@ export function mountAuthDialogs(root: HTMLElement): {
 
     const maskedList = store.geminiSummary.maskedKeys;
     const keyCount = Math.max(maskedList.length, plainKeys.length);
+    const paidUnlimited = store.geminiPaidUnlimited;
     const usageByIdx: KeyUsageView[] = Array.from({ length: keyCount }, (_, idx) => {
       const raw = plainKeys[idx];
-      if (raw) return getKeyUsageView(raw);
+      if (raw) return getKeyUsageView(raw, paidUnlimited);
       return {
         fingerprint: `idx_${idx}`,
         callsToday: 0,
@@ -216,20 +228,37 @@ export function mountAuthDialogs(root: HTMLElement): {
     const quotaSum = getTotalTodayCallsSummary(
       keyCount,
       plainKeys.length > 0 ? plainKeys : undefined,
+      paidUnlimited,
     );
     const totalPct =
-      quotaSum.totalCapacity > 0
-        ? Math.min(100, Math.round((quotaSum.totalCallsToday / quotaSum.totalCapacity) * 100))
-        : 0;
+      paidUnlimited
+        ? quotaSum.totalCallsToday > 0
+          ? 18
+          : 0
+        : quotaSum.totalCapacity > 0
+          ? Math.min(100, Math.round((quotaSum.totalCallsToday / quotaSum.totalCapacity) * 100))
+          : 0;
 
-    const modelOptions = SUPPORTED_GEMINI_MODELS.map(
+    const isPresetModel = SUPPORTED_GEMINI_MODELS.some((m) => m.id === store.geminiModel);
+    const showCustomModelInput = forceCustomModelInput || !isPresetModel;
+    const selectVal = showCustomModelInput ? "__custom__" : store.geminiModel;
+
+    const modelOptions = [
+      ...SUPPORTED_GEMINI_MODELS.map(
+        (m) =>
+          `<option value="${m.id}" ${selectVal === m.id ? "selected" : ""}>${esc(m.label)}</option>`,
+      ),
+      `<option value="__custom__" ${selectVal === "__custom__" ? "selected" : ""}>自定义 Vertex / Gemini 模型 ID...</option>`,
+    ].join("");
+
+    const reviewModelOptions = REVIEW_MODEL_OPTIONS.map(
       (m) =>
-        `<option value="${m.id}" ${store.geminiModel === m.id ? "selected" : ""}>${esc(m.label)}</option>`,
+        `<option value="${m.id}" ${store.geminiReviewModel === m.id ? "selected" : ""}>${esc(m.label)}</option>`,
     ).join("");
 
     const keyRowsHtml =
       keyCount > 0
-        ? `<div style="display:flex;flex-direction:column;gap:0.35rem;max-block-size:200px;overflow-y:auto;padding-inline-end:2px">
+        ? `<div style="display:flex;flex-direction:column;gap:0.35rem;max-block-size:190px;overflow-y:auto;padding-inline-end:2px">
             ${Array.from({ length: keyCount }, (_, idx) => {
               const mk = maskedList[idx] || (plainKeys[idx] ? `${plainKeys[idx].slice(0, 6)}...${plainKeys[idx].slice(-4)}` : "***");
               const u = usageByIdx[idx];
@@ -240,7 +269,7 @@ export function mountAuthDialogs(root: HTMLElement): {
                     <span class="mono-cell">#${idx + 1} · ${esc(mk)}</span>
                     <div style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap">
                       ${renderKeyHealthBadge(u)}
-                      ${renderKeyQuotaBadge(u)}
+                      ${renderKeyQuotaBadge(u, paidUnlimited)}
                       <button type="button" class="seg-option" data-del-key-idx="${idx}">删除</button>
                     </div>
                   </div>
@@ -254,12 +283,16 @@ export function mountAuthDialogs(root: HTMLElement): {
           </div>`
         : `<div class="field-hint">尚未添加任何 API Key，请在下方输入框新增。</div>`;
 
+    const quotaHeaderText = paidUnlimited
+      ? `今日 AI 调用统计：总计 ${quotaSum.totalCallsToday} 次（日期 ${esc(quotaSum.day)} · 付费高配模式，不设每日 ${DAILY_KEY_QUOTA_LIMIT} 次上限）`
+      : `今日 AI 调用统计：总计 ${quotaSum.totalCallsToday} / ${quotaSum.totalCapacity} 次（日期 ${esc(quotaSum.day)} · 单 Key 每日上限 ${DAILY_KEY_QUOTA_LIMIT} 次，满额自动轮换，跨天自动清零）`;
+
     geminiDialog.innerHTML = `
       <div class="dialog-header">
-        <h2 id="dlg-gemini-title" class="dialog-title">Gemini API 密钥池配置（逐行语义切分辅助）</h2>
+        <h2 id="dlg-gemini-title" class="dialog-title">Gemini / Vertex AI 密钥池与高阶模型配置</h2>
         <button type="button" class="seg-option" data-close-gemini aria-label="关闭窗口">${icons.close}</button>
       </div>
-      <div class="dialog-body" style="gap:0.65rem">
+      <div class="dialog-body" style="gap:0.6rem">
         ${
           statusMsg
             ? `<div class="notice-bar ${isErr ? "notice-error" : "notice-info"}" style="border-radius:8px">${esc(statusMsg)}</div>`
@@ -272,8 +305,13 @@ export function mountAuthDialogs(root: HTMLElement): {
 
         <div class="col-grid-2">
           <div class="field-group">
-            <label class="field-label" for="sel-gemini-model">选用模型</label>
+            <label class="field-label" for="sel-gemini-model">选用主模型</label>
             <select id="sel-gemini-model" class="select-input">${modelOptions}</select>
+            ${
+              showCustomModelInput
+                ? `<input id="inp-custom-gemini-model" type="text" class="text-input mono-input" style="margin-block-start:0.25rem" placeholder="输入自定义模型 ID，如 gemini-2.5-pro" value="${esc(store.geminiModel)}" />`
+                : ""
+            }
           </div>
 
           <div class="field-group">
@@ -285,10 +323,20 @@ export function mountAuthDialogs(root: HTMLElement): {
           </div>
         </div>
 
+        <div class="field-group">
+          <label class="field-label" for="sel-gemini-review-model">疑难复核与重切模型（可选高阶升级）</label>
+          <select id="sel-gemini-review-model" class="select-input">${reviewModelOptions}</select>
+        </div>
+
+        <label class="checkbox-row">
+          <input type="checkbox" id="chk-gemini-paid-unlimited" ${paidUnlimited ? "checked" : ""} />
+          <span>付费 Vertex AI / 绑卡密钥模式（仅统计今日调用次数，取消单 Key 每日 500 次封顶限制）</span>
+        </label>
+
         <div class="progress-strip">
           <div class="field-label-row">
             <span class="field-label" style="font-size:var(--text-xs)">
-              今日 AI 调用统计：总计 ${quotaSum.totalCallsToday} / ${quotaSum.totalCapacity} 次（日期 ${esc(quotaSum.day)} · 单 Key 每日上限 ${DAILY_KEY_QUOTA_LIMIT} 次，满额自动轮换，跨天自动清零）
+              ${quotaHeaderText}
             </span>
             <button type="button" id="btn-reset-key-quota" class="seg-option">重置今日统计</button>
           </div>
@@ -320,7 +368,7 @@ export function mountAuthDialogs(root: HTMLElement): {
           <div class="field-label-row">
             <label class="field-label" for="txt-gemini-keys">新增 API Key（支持一次粘贴多个，每行一个，自动去重追加）</label>
           </div>
-          <textarea id="txt-gemini-keys" class="text-area" style="min-block-size:64px" placeholder="粘贴要新增的 AIza... 或 AQ... 密钥（每行一个），点击「+ 追加到密钥池」加入密钥池">${esc(prevDraft)}</textarea>
+          <textarea id="txt-gemini-keys" class="text-area" style="min-block-size:60px" placeholder="粘贴要新增的 AQ... (Vertex AI) 或 AIza... 密钥（每行一个），点击「+ 追加到密钥池」">${esc(prevDraft)}</textarea>
           <div class="btn-row-compact">
             <button type="button" id="btn-add-gemini-keys" class="btn btn-compact">+ 追加到密钥池</button>
             <button type="button" id="btn-test-gemini" class="btn btn-compact">逐个检测全部密钥 (${keyCount} 个)</button>
@@ -333,12 +381,29 @@ export function mountAuthDialogs(root: HTMLElement): {
       </div>
     `;
 
+    const resolveActiveModel = (): GeminiModelId => {
+      const selVal =
+        geminiDialog.querySelector<HTMLSelectElement>("#sel-gemini-model")?.value ??
+        "gemini-3.8-flash";
+      if (selVal === "__custom__") {
+        const customVal =
+          geminiDialog
+            .querySelector<HTMLInputElement>("#inp-custom-gemini-model")
+            ?.value.trim() ?? "";
+        return customVal || store.geminiModel || "gemini-3.8-flash";
+      }
+      return selVal;
+    };
+
     const syncUiPrefs = () => {
       store.geminiEnabled =
         geminiDialog.querySelector<HTMLInputElement>("#chk-gemini-enable")?.checked ?? true;
-      store.geminiModel =
-        (geminiDialog.querySelector<HTMLSelectElement>("#sel-gemini-model")?.value as GeminiModelId) ??
-        "gemini-3.5-flash-lite";
+      store.geminiModel = resolveActiveModel();
+      store.geminiReviewModel =
+        geminiDialog.querySelector<HTMLSelectElement>("#sel-gemini-review-model")?.value ?? "";
+      store.geminiPaidUnlimited =
+        geminiDialog.querySelector<HTMLInputElement>("#chk-gemini-paid-unlimited")?.checked ??
+        false;
       store.geminiRotation =
         (geminiDialog.querySelector<HTMLSelectElement>("#sel-gemini-rot")?.value as KeyRotationStrategy) ??
         "round_robin";
@@ -347,6 +412,30 @@ export function mountAuthDialogs(root: HTMLElement): {
     geminiDialog.querySelectorAll("[data-close-gemini]").forEach((b) =>
       b.addEventListener("click", () => geminiDialog.close()),
     );
+
+    geminiDialog.querySelector("#sel-gemini-model")?.addEventListener("change", (e) => {
+      const val = (e.target as HTMLSelectElement).value;
+      if (val === "__custom__") {
+        forceCustomModelInput = true;
+      } else {
+        forceCustomModelInput = false;
+        store.geminiModel = val;
+      }
+      syncUiPrefs();
+      notifyStateChanged();
+      void renderGeminiContent();
+    });
+
+    geminiDialog.querySelector("#sel-gemini-review-model")?.addEventListener("change", () => {
+      syncUiPrefs();
+      notifyStateChanged();
+    });
+
+    geminiDialog.querySelector("#chk-gemini-paid-unlimited")?.addEventListener("change", () => {
+      syncUiPrefs();
+      notifyStateChanged();
+      void renderGeminiContent();
+    });
 
     geminiDialog.querySelector("#btn-reset-key-quota")?.addEventListener("click", () => {
       syncUiPrefs();
@@ -429,16 +518,21 @@ export function mountAuthDialogs(root: HTMLElement): {
 
     geminiDialog.querySelector("#btn-test-gemini")?.addEventListener("click", async () => {
       syncUiPrefs();
+      notifyStateChanged();
       try {
         const keys = await hostBridge.getPlainGeminiKeys();
         if (keys.length === 0) {
           return renderGeminiContent("密钥池为空，请先新增至少一个 API Key。", true);
         }
-        await renderGeminiContent(`正在逐个检测全部密钥 (0 / ${keys.length})，请稍候...`);
+        await renderGeminiContent(
+          `正在使用模型 ${store.geminiModel} 逐个检测全部密钥 (0 / ${keys.length})，请稍候...`,
+        );
         const client = new GeminiPoolClient({
           apiKeys: keys,
           model: store.geminiModel,
           rotation: store.geminiRotation,
+          reviewModel: store.geminiReviewModel || undefined,
+          paidUnlimited: store.geminiPaidUnlimited,
         });
         const reports = await client.testAllKeysIndividually((rep, done, total) => {
           notifyStateChanged();
@@ -452,10 +546,10 @@ export function mountAuthDialogs(root: HTMLElement): {
         notifyStateChanged();
         const guide =
           badCount > 0
-            ? "（请点击「清理失效密钥」移除不可用密钥，或补充 Google AI Studio 免费 AIza... 密钥）"
+            ? "（请点击「清理失效密钥」移除不可用密钥，或补充有效 Vertex AQ. / AIza 密钥）"
             : "";
         await renderGeminiContent(
-          `逐个检测完成：共 ${reports.length} 个密钥 — 可用 ${okCount} 个，不可用 ${badCount} 个${guide}`,
+          `逐个检测完成（模型 ${store.geminiModel}）：共 ${reports.length} 个密钥 — 可用 ${okCount} 个，不可用 ${badCount} 个${guide}`,
           okCount === 0,
         );
       } catch (err) {
@@ -470,6 +564,7 @@ export function mountAuthDialogs(root: HTMLElement): {
       .querySelector("#btn-save-gemini")
       ?.addEventListener("click", async () => {
         syncUiPrefs();
+        forceCustomModelInput = false;
         const txtEl = geminiDialog.querySelector<HTMLTextAreaElement>("#txt-gemini-keys");
         const rawNew = txtEl?.value.trim() ?? "";
         try {
@@ -500,6 +595,7 @@ export function mountAuthDialogs(root: HTMLElement): {
       oauthDialog.showModal();
     },
     openGeminiDialog: () => {
+      forceCustomModelInput = !SUPPORTED_GEMINI_MODELS.some((m) => m.id === store.geminiModel);
       void renderGeminiContent();
       geminiDialog.showModal();
     },
