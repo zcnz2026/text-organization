@@ -35,10 +35,16 @@ export interface BilingualAlignmentAnalysis {
   softReason: string | null;
 }
 
+export interface SemanticRowAudit {
+  row: number;
+  semanticMatch: "exact" | "adjacent_clause_inversion" | "wrong_sentence";
+}
+
 export interface SemanticAuditResult {
   verdict: "accurate" | "fixed" | "unfixable";
   hasInversion?: boolean;
   reason: string;
+  rowAudits?: SemanticRowAudit[];
   fixedLines?: string[];
 }
 
@@ -93,6 +99,20 @@ const TOKEN_SPANS_SINGLE_SCHEMA = {
 const SEMANTIC_AUDIT_SCHEMA = {
   type: "object",
   properties: {
+    rowAudits: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          row: { type: "integer" },
+          semanticMatch: {
+            type: "string",
+            enum: ["exact", "adjacent_clause_inversion", "wrong_sentence"],
+          },
+        },
+        required: ["row", "semanticMatch"],
+      },
+    },
     verdict: {
       type: "string",
       enum: ["accurate", "fixed", "unfixable"],
@@ -101,7 +121,7 @@ const SEMANTIC_AUDIT_SCHEMA = {
     reason: { type: "string" },
     fixedLines: { type: "array", items: { type: "string" } },
   },
-  required: ["verdict", "reason"],
+  required: ["rowAudits", "verdict", "reason"],
 };
 
 export function capitalizeFirstLetter(text: string): string {
@@ -643,24 +663,50 @@ export function projectLinesVerbatimResilient(
 
 const NO_STANDARD_PUNCT_LANGS = new Set(["th", "lo", "km", "my"]);
 
-function cleanLineEndingForPunctCheck(s: string): string {
+export function cleanLineEndingForPunctCheck(s: string): string {
   return stripOuterDoubleQuotes((s || "").trim())
-    .replace(/["”»'’)\]]+$/u, "")
+    .replace(/([.!?。！？।។။؟՞;;])["”»«“„'’‘‚)\]}」』》]+$/u, "$1")
+    .replace(/["”»«“„'’‘‚)\]}」』》]+([.!?。！？।។။؟՞;;])$/u, "$1")
+    .replace(/["”»«“„'’‘‚)\]}」』》]+$/u, "")
     .trim();
 }
 
 function hasTrailingEllipsisMark(s: string): boolean {
-  return /(?:……|\.\.\.|…|\[\.\.\.\]|\(\.\.\.\))$/u.test(cleanLineEndingForPunctCheck(s));
-}
-
-function endsWithStrongSentencePunct(s: string): boolean {
   const c = cleanLineEndingForPunctCheck(s);
-  return !hasTrailingEllipsisMark(c) && /[.!?。！？।។။]$/u.test(c);
+  return (
+    /(?:……|\.\.\.|…|\[\.\.\.\]|\(\.\.\.\))$/u.test(c) ||
+    /(?:……|\.\.\.|…|\[\.\.\.\]|\(\.\.\.\))["”»«“„'’‘‚)\]}」』》]*$/u.test((s || "").trim())
+  );
 }
 
-function endsWithCommaOrColonPunct(s: string): boolean {
+export function endsWithStrongSentencePunct(s: string): boolean {
+  const c = cleanLineEndingForPunctCheck(s);
+  return !hasTrailingEllipsisMark(c) && /[.!?。！？।។။؟՞;;]$/u.test(c);
+}
+
+export function endsWithCommaOrColonPunct(s: string): boolean {
   const c = cleanLineEndingForPunctCheck(s);
   return !hasTrailingEllipsisMark(c) && /[,，、:：]$/u.test(c);
+}
+
+function hasUnclosedInlineSingleQuote(s: string): boolean {
+  const raw = stripOuterDoubleQuotes((s || "").trim());
+  const openSmart = (raw.match(/‘/g) || []).length;
+  const closeSmart = (raw.match(/’/g) || []).length;
+  if (openSmart > closeSmart) return true;
+  const openCjk = (raw.match(/『/g) || []).length;
+  const closeCjk = (raw.match(/』/g) || []).length;
+  return openCjk > closeCjk;
+}
+
+export function isCompleteSentenceAnchorRow(row: ScriptRow | undefined): boolean {
+  if (!row) return false;
+  const zh = (row.chinese || "").trim();
+  const en = (row.english || "").trim();
+  const present = [zh, en].filter(Boolean);
+  if (present.length === 0) return false;
+  if (present.some((s) => hasUnclosedInlineSingleQuote(s))) return false;
+  return present.every((s) => endsWithStrongSentencePunct(s));
 }
 
 /**
@@ -836,8 +882,8 @@ export function analyzeBilingualAlignment(
     }
   }
 
-  // Soft Check 5: Per-row length share & extreme short/long mismatch (may be caused by clause inversion)
-  if (!softReason && lines.length >= 2) {
+  // Hard Check 5A & 5B + Soft Check 5: Cross-language mathematical sentence-anchor progress & length share analysis
+  if (lines.length >= 2) {
     const stripEllipsisAndQuotes = (s: string) =>
       stripOuterDoubleQuotes((s || "").trim())
         .replace(/(?:……|\.\.\.|…|\[\.\.\.\]|\(\.\.\.\))+$/u, "")
@@ -848,33 +894,125 @@ export function analyzeBilingualAlignment(
     const tgLens = lines.map((l) => stripEllipsisAndQuotes(l || "").length);
     const useEn = enLens.every((len) => len > 0);
     const srcLens = useEn ? enLens : zhLens;
+    const totalEn = enLens.reduce((a, b) => a + b, 0);
+    const totalZh = zhLens.reduce((a, b) => a + b, 0);
     const totalSrc = srcLens.reduce((a, b) => a + b, 0);
     const totalTg = tgLens.reduce((a, b) => a + b, 0);
 
     if (totalSrc > 0 && totalTg > 0) {
-      for (let i = 0; i < lines.length; i += 1) {
-        const enL = enLens[i];
-        const zhL = zhLens[i];
-        const tgL = tgLens[i];
+      // Hard Check 5A: Cumulative character share drift at sentence-ending anchor rows (blocks >= 4 rows)
+      if (lines.length >= 4 && (totalEn >= 100 || totalZh >= 40)) {
+        let cumSrc = 0;
+        let cumTg = 0;
+        for (let i = 0; i < lines.length - 1; i += 1) {
+          cumSrc += srcLens[i];
+          cumTg += tgLens[i];
+          const row = sourceRows[i];
+          const zhStrong = endsWithStrongSentencePunct(row?.chinese || "");
+          const enStrong = endsWithStrongSentencePunct(row?.english || "");
+          const isDualAnchor = isCompleteSentenceAnchorRow(row);
+          const isSingleAnchor =
+            (zhStrong || enStrong) &&
+            !hasUnclosedInlineSingleQuote(row?.chinese || "") &&
+            !hasUnclosedInlineSingleQuote(row?.english || "");
+          if (!isDualAnchor && !isSingleAnchor) continue;
 
-        if (enL > 0 && enL <= 20 && tgL >= 65) {
-          softReason = `第 ${i + 1} 行长短差异较大（英文 ${enL} 字符 vs 目标语 ${tgL} 字符）`;
-          break;
+          const cumSrcShare = cumSrc / totalSrc;
+          const cumTgShare = cumTg / totalTg;
+          const drift = Math.abs(cumTgShare - cumSrcShare);
+          const maxDrift = isDualAnchor ? 0.18 : 0.20;
+          if (drift > maxDrift) {
+            return {
+              hardReason: `第 ${i + 1} 行完整句边界累积进度错位（源文 ${Math.round(cumSrcShare * 100)}% vs 目标语 ${Math.round(cumTgShare * 100)}%），存在跨句错行`,
+              softReason: null,
+            };
+          }
         }
-        if ((enL >= 15 || zhL >= 6) && tgL <= 3) {
-          softReason = `第 ${i + 1} 行目标语过短（仅 ${tgL} 字符）`;
-          break;
+      }
+
+      // Compute per-row length share ratios
+      const ratios = lines.map((_l, i) => {
+        const srcShare = srcLens[i] / totalSrc;
+        const tgShare = tgLens[i] / totalTg;
+        return tgShare / Math.max(0.015, srcShare);
+      });
+
+      // Hard Check 5B: Consecutive dual-row same-direction collapse/explosion or severe skew without neighbor compensation
+      if (lines.length >= 3 && (totalEn >= 80 || totalZh >= 32)) {
+        for (let i = 0; i < lines.length - 1; i += 1) {
+          const r1Meets = useEn ? enLens[i] >= 10 : zhLens[i] >= 4;
+          const r2Meets = useEn ? enLens[i + 1] >= 10 : zhLens[i + 1] >= 4;
+          if (!r1Meets || !r2Meets) continue;
+
+          if (
+            (ratios[i] < 0.38 && ratios[i + 1] < 0.38) ||
+            (ratios[i] > 2.30 && ratios[i + 1] > 2.30)
+          ) {
+            return {
+              hardReason: `第 ${i + 1}~${i + 2} 行连续出现同向长度失衡（占比比值 ${ratios[i].toFixed(2)} 与 ${ratios[i + 1].toFixed(2)}），存在跨句错行`,
+              softReason: null,
+            };
+          }
         }
 
-        const srcL = srcLens[i];
-        const meetsMinLen = useEn ? enL >= 10 : zhL >= 4;
-        if (meetsMinLen) {
-          const srcShare = srcL / totalSrc;
-          const tgShare = tgL / totalTg;
-          const ratio = tgShare / Math.max(0.015, srcShare);
-          if (ratio < 0.35 || ratio > 2.55) {
-            softReason = `第 ${i + 1} 行长度占比失衡（占比比值 ${ratio.toFixed(2)}，疑似跨行错位或语序倒装）`;
+        const pairRatio = (idxA: number, idxB: number): number => {
+          const pSrc = (srcLens[idxA] + srcLens[idxB]) / totalSrc;
+          const pTg = (tgLens[idxA] + tgLens[idxB]) / totalTg;
+          return pTg / Math.max(0.02, pSrc);
+        };
+
+        for (let i = 0; i < lines.length; i += 1) {
+          const meetsMin = useEn ? enLens[i] >= 15 : zhLens[i] >= 6;
+          if (!meetsMin) continue;
+          if (ratios[i] >= 0.35 && ratios[i] <= 2.55) continue;
+
+          const neighborPairs: number[] = [];
+          if (i > 0) {
+            const pairEn = enLens[i - 1] + enLens[i];
+            const pairZh = zhLens[i - 1] + zhLens[i];
+            if (pairEn >= 50 || pairZh >= 20) neighborPairs.push(pairRatio(i - 1, i));
+          }
+          if (i < lines.length - 1) {
+            const pairEn = enLens[i] + enLens[i + 1];
+            const pairZh = zhLens[i] + zhLens[i + 1];
+            if (pairEn >= 50 || pairZh >= 20) neighborPairs.push(pairRatio(i, i + 1));
+          }
+
+          if (
+            neighborPairs.length > 0 &&
+            neighborPairs.every((pr) => pr < 0.40 || pr > 2.40)
+          ) {
+            return {
+              hardReason: `第 ${i + 1} 行及相邻双行合并占比严重失衡（单行比值 ${ratios[i].toFixed(2)}），存在跨句错行`,
+              softReason: null,
+            };
+          }
+        }
+      }
+
+      // Soft Check 5: Single-row length share & extreme short/long mismatch (may be caused by clause inversion)
+      if (!softReason) {
+        for (let i = 0; i < lines.length; i += 1) {
+          const enL = enLens[i];
+          const zhL = zhLens[i];
+          const tgL = tgLens[i];
+
+          if (enL > 0 && enL <= 20 && tgL >= 65) {
+            softReason = `第 ${i + 1} 行长短差异较大（英文 ${enL} 字符 vs 目标语 ${tgL} 字符）`;
             break;
+          }
+          if ((enL >= 15 || zhL >= 6) && tgL <= 3) {
+            softReason = `第 ${i + 1} 行目标语过短（仅 ${tgL} 字符）`;
+            break;
+          }
+
+          const meetsMinLen = useEn ? enL >= 10 : zhL >= 4;
+          if (meetsMinLen) {
+            const ratio = ratios[i];
+            if (ratio < 0.35 || ratio > 2.55) {
+              softReason = `第 ${i + 1} 行长度占比失衡（占比比值 ${ratio.toFixed(2)}，疑似跨行错位或语序倒装）`;
+              break;
+            }
           }
         }
       }
@@ -950,14 +1088,17 @@ export async function semanticAuditOrFixWithAi(
       : "";
 
     const tableSpec = sourceRows
-      .map(
-        (r, i) =>
-          `[${i + 1}]\n  中文: ${r.chinese}\n  英文: ${r.english}\n  当前外文切分: ${draftLines[i] ?? ""}`,
-      )
+      .map((r, i) => {
+        const anchorNote = isCompleteSentenceAnchorRow(r)
+          ? " [此行中英均为完整句句末]"
+          : "";
+        return `[${i + 1}]${anchorNote}\n  中文: ${r.chinese}\n  英文: ${r.english}\n  当前外文切分: ${draftLines[i] ?? ""}`;
+      })
       .join("\n");
     const refEnBlock = referenceEn ? `原段完整英文参考：\n${referenceEn}\n\n` : "";
 
     const rawRes = await gemini.generateStructuredJson<{
+      rowAudits?: SemanticRowAudit[];
       verdict?: "accurate" | "fixed" | "unfixable";
       hasInversion?: boolean;
       reason?: string;
@@ -966,10 +1107,14 @@ export async function semanticAuditOrFixWithAi(
     }>(
       {
         systemInstruction:
-          "你是多语种剧本三语语义审校与重切裁判。请逐行对比下面每一行的【中文】【英文】与【当前外文切分】的实际语义（不要只看字数长短或标点符号风格）：\n" +
-          "1. 若因跨语种标点风格差异（如源文 1 个问句在目标语中译为 2 个连问句、或源文逗号长句在目标语中合法断为句号短句）或从句语序倒装，但每一行外文表达的意思与该行中英文完全对应、没有跨行错位或漏句，请返回 verdict:\"accurate\" 并在 reason 中简述原因。\n" +
-          "2. 若确实存在跨行顺延错位、问号/句号错行、遗漏了结尾句/开头句，或末行误吞了省略号之后的多余句子，请基于【不可改动的完整外文串】重新 1:1 切分，返回 verdict:\"fixed\" 及严格等于字幕行数的 fixedLines 数组（严禁修改、增删任何外文单词或标点！）。\n" +
-          "3. 若定稿原文与中英文完全对不上无法修复，返回 verdict:\"unfixable\"。" +
+          "你是多语种剧本三语语义审校与重切裁判。请先在 rowAudits 中逐行核对每一行【中文】【英文】与【当前外文切分】的真实含义，再给出 verdict：\n" +
+          "1. 在 rowAudits 数组中逐行标记 semanticMatch：\n" +
+          "   - \"exact\"：该行外文与该行中英文意思完全对应；\n" +
+          "   - \"adjacent_clause_inversion\"：仅限【同一完整句内部】相邻两行因从句语序倒装交换了先后顺序，且这两行外文合起来的意思与这两行中英文完全相等（严禁把跨句错行、短句窜入长句、或两行压成一行伪称为倒装！）；\n" +
+          "   - \"wrong_sentence\"：该行外文包含了上一句或下一句的内容、跨完整句串行、漏句或张冠李戴。\n" +
+          "2. 只有当所有行均为 \"exact\" 或合法的 \"adjacent_clause_inversion\"（绝无任何一行 \"wrong_sentence\"）时，才允许返回 verdict:\"accurate\"。\n" +
+          "3. 只要有任何一行存在 \"wrong_sentence\"、跨句顺延错位、问号/句号错行、遗漏首尾句或末行误吞省略号后的多余句子，必须基于【不可改动的完整外文串】重新 1:1 切分，返回 verdict:\"fixed\" 及严格等于字幕行数的 fixedLines 数组（严禁修改、增删任何外文单词或标点！）。\n" +
+          "4. 若定稿原文与中英文完全对不上无法修复，返回 verdict:\"unfixable\"。" +
           partialOmitRule,
         userPrompt:
           `目标语种：${rule.langName}（共 ${sourceRows.length} 行）\n` +
@@ -982,6 +1127,11 @@ export async function semanticAuditOrFixWithAi(
       { preferAlternateKey: true },
     );
 
+    const rowAudits = Array.isArray(rawRes.rowAudits) ? rawRes.rowAudits : undefined;
+    const hasWrongSentenceAudit =
+      rowAudits !== undefined &&
+      rowAudits.some((item) => item && item.semanticMatch === "wrong_sentence");
+
     const candidateLines =
       Array.isArray(rawRes.fixedLines) && rawRes.fixedLines.length === sourceRows.length
         ? rawRes.fixedLines
@@ -989,15 +1139,26 @@ export async function semanticAuditOrFixWithAi(
           ? rawRes.lines
           : undefined;
 
-    if (rawRes.verdict === "accurate" && !candidateLines) {
+    if (rawRes.verdict === "accurate" && !candidateLines && !hasWrongSentenceAudit) {
       return {
         verdict: "accurate",
-        hasInversion: Boolean(rawRes.hasInversion ?? true),
+        hasInversion: Boolean(
+          rawRes.hasInversion ??
+            (rowAudits
+              ? rowAudits.some((r) => r.semanticMatch === "adjacent_clause_inversion")
+              : true),
+        ),
         reason: rawRes.reason || "AI 语义核对通过",
+        ...(rowAudits ? { rowAudits } : {}),
       };
     }
 
-    if ((rawRes.verdict === "fixed" || (!rawRes.verdict && candidateLines)) && candidateLines) {
+    if (
+      (rawRes.verdict === "fixed" ||
+        (!rawRes.verdict && candidateLines) ||
+        (hasWrongSentenceAudit && candidateLines)) &&
+      candidateLines
+    ) {
       const projected = projectLinesVerbatimResilient(sourceText, candidateLines, {
         isPartial: isPartialOrOmission,
       });
@@ -1007,13 +1168,17 @@ export async function semanticAuditOrFixWithAi(
           hasInversion: Boolean(rawRes.hasInversion),
           reason: rawRes.reason || "AI 已按完整原文修正断行",
           fixedLines: projected,
+          ...(rowAudits ? { rowAudits } : {}),
         };
       }
     }
 
     return {
       verdict: "unfixable",
-      reason: rawRes.reason || triggerReason,
+      reason: hasWrongSentenceAudit
+        ? `逐行语义核对发现错行（${rawRes.reason || triggerReason}），且未提供有效重切行`
+        : rawRes.reason || triggerReason,
+      ...(rowAudits ? { rowAudits } : {}),
     };
   } catch (err) {
     return {
@@ -1118,11 +1283,14 @@ export async function splitByTokenSpansWithAi(
       const truncNote = tr.deletedEnPrefix
         ? ` | 【句首已截取删去英文 "${tr.deletedEnPrefix}"】`
         : "";
+      const anchorNote = isCompleteSentenceAnchorRow(r)
+        ? " | 【句末硬锚点：目标语此行必须在对应完整句句末结束，严禁跨句提前或延后！】"
+        : "";
       const omitNote =
         i === sourceRows.length - 1 && hasExplicitRowOmission(r)
           ? " | 【此行末尾有省略号：切分到此句结束处立刻停止，严禁把原文后面被省略的句子或问句归入此行！】"
           : "";
-      return `  (${i + 1}) ZH: ${r.chinese} | EN: ${r.english}${truncNote}${omitNote}`;
+      return `  (${i + 1}) ZH: ${r.chinese} | EN: ${r.english}${truncNote}${anchorNote}${omitNote}`;
     })
     .join("\n");
   const refEnLine = opts?.referenceEn ? `原段完整英文参考：\n${opts.referenceEn}\n` : "";
@@ -1175,6 +1343,231 @@ export async function splitByTokenSpansWithAi(
     });
     if (projected) {
       return { lines: projected, hasInversion: Boolean(res.hasInversion) };
+    }
+  }
+
+  return null;
+}
+
+export interface SentenceRowGroup {
+  startRow: number;
+  endRow: number;
+  rows: ScriptRow[];
+}
+
+export function partitionRowsBySentenceCheckpoints(sourceRows: ScriptRow[]): SentenceRowGroup[] {
+  const buildGroups = (requireDual: boolean): SentenceRowGroup[] => {
+    const groups: SentenceRowGroup[] = [];
+    let curStart = 0;
+    for (let i = 0; i < sourceRows.length; i += 1) {
+      const isLast = i === sourceRows.length - 1;
+      const r = sourceRows[i];
+      const isAnchor = requireDual
+        ? isCompleteSentenceAnchorRow(r)
+        : (endsWithStrongSentencePunct(r?.english || "") || endsWithStrongSentencePunct(r?.chinese || "")) &&
+          !hasUnclosedInlineSingleQuote(r?.english || "") &&
+          !hasUnclosedInlineSingleQuote(r?.chinese || "");
+      if (isAnchor || isLast) {
+        groups.push({
+          startRow: curStart,
+          endRow: i,
+          rows: sourceRows.slice(curStart, i + 1),
+        });
+        curStart = i + 1;
+      }
+    }
+    return groups;
+  };
+  const singleOrDualGroups = buildGroups(false);
+  if (singleOrDualGroups.length >= 2) return singleOrDualGroups;
+  return buildGroups(true);
+}
+
+function splitTargetIntoSentences(cleanSrc: string): string[] {
+  const text = stripOuterDoubleQuotes((cleanSrc || "").trim());
+  if (!text) return [];
+  const parts = text
+    .split(/(?<=[.!?。！？।។။؟՞;;]+["”»«“„'’‘‚)\]}」』》]*)\s+/u)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return parts.length > 0 ? parts : [text];
+}
+
+function alignTargetSentencesToGroups(
+  targetSentences: string[],
+  groups: SentenceRowGroup[],
+  rule: PunctuationRule,
+): string[] | null {
+  const M = targetSentences.length;
+  const G = groups.length;
+  if (M < G || G === 0) return null;
+  if (M === G) return targetSentences;
+
+  const sentLens = targetSentences.map((s) => Math.max(1, normAlnumStr(s).length));
+  const sentQs = targetSentences.map((s) => countTargetQuestions(s, rule.langCode));
+  const totalTgLen = sentLens.reduce((a, b) => a + b, 0);
+
+  const grpLens = groups.map((g) =>
+    Math.max(
+      1,
+      g.rows.reduce((acc, r) => acc + normAlnumStr(r.english || r.chinese).length, 0),
+    ),
+  );
+  const grpQs = groups.map((g) =>
+    g.rows.reduce((acc, r) => acc + countSrcQuestions(r.english || r.chinese), 0),
+  );
+  const totalSrcLen = grpLens.reduce((a, b) => a + b, 0);
+
+  // Dynamic programming to partition M target sentences into G contiguous non-empty groups
+  const dp: number[][] = Array.from({ length: G + 1 }, () => new Array(M + 1).fill(1e9));
+  const parent: number[][] = Array.from({ length: G + 1 }, () => new Array(M + 1).fill(-1));
+  dp[0][0] = 0;
+
+  for (let g = 1; g <= G; g += 1) {
+    const srcShare = grpLens[g - 1] / totalSrcLen;
+    const expectedQ = grpQs[g - 1];
+    for (let j = g; j <= M - (G - g); j += 1) {
+      let subLen = 0;
+      let subQ = 0;
+      for (let k = j; k >= g; k -= 1) {
+        subLen += sentLens[k - 1];
+        subQ += sentQs[k - 1];
+        const tgShare = subLen / totalTgLen;
+        const shareDiff = Math.abs(tgShare - srcShare);
+        const qPenalty =
+          (expectedQ === 0 && subQ > 0) || (expectedQ > 0 && subQ === 0)
+            ? 5.0
+            : Math.abs(subQ - expectedQ) * 0.4;
+        const cost = dp[g - 1][k - 1] + shareDiff * 2.5 + qPenalty;
+        if (cost < dp[g][j]) {
+          dp[g][j] = cost;
+          parent[g][j] = k - 1;
+        }
+      }
+    }
+  }
+
+  if (dp[G][M] >= 1e8) return null;
+  const out: string[] = new Array(G);
+  let curJ = M;
+  for (let g = G; g >= 1; g -= 1) {
+    const prevK = parent[g][curJ];
+    if (prevK < 0) return null;
+    out[g - 1] = targetSentences.slice(prevK, curJ).join(" ");
+    curJ = prevK;
+  }
+  return out;
+}
+
+/**
+ * Divide-and-conquer sentence-checkpoint rescue (`splitBySentenceCheckpointsWithAi`):
+ * When a multi-row block (>= 4 rows with >= 2 complete-sentence anchors) suffers cross-sentence drift,
+ * partitions the block at complete-sentence anchor rows into independent sentence groups (1~4 rows each),
+ * aligns target sentences to each sentence group, and splits each multi-row group independently so errors
+ * can never cascade across sentence boundaries.
+ */
+export async function splitBySentenceCheckpointsWithAi(
+  preparedSrc: string,
+  sourceRows: ScriptRow[],
+  rule: PunctuationRule,
+  gemini: GeminiPoolClient,
+  opts?: {
+    isPartial?: boolean;
+    suppressAutoEllipsis?: boolean;
+    referenceEn?: string;
+  },
+): Promise<{ lines: string[]; hasInversion?: boolean } | null> {
+  const groups = partitionRowsBySentenceCheckpoints(sourceRows);
+  if (groups.length < 2) return null;
+
+  const cleanSrc = stripOuterDoubleQuotes(preparedSrc).trim();
+  const targetSentences = splitTargetIntoSentences(cleanSrc);
+  const groupedTargetChunks = alignTargetSentencesToGroups(targetSentences, groups, rule);
+
+  if (groupedTargetChunks && groupedTargetChunks.length === groups.length) {
+    const assembled: string[] = [];
+    let anyInversion = false;
+    let allGroupsOk = true;
+
+    for (let gIdx = 0; gIdx < groups.length; gIdx += 1) {
+      const grp = groups[gIdx];
+      const chunkText = groupedTargetChunks[gIdx];
+
+      if (grp.rows.length === 1) {
+        assembled.push(chunkText);
+        continue;
+      }
+
+      let grpLines: string[] | null = null;
+      try {
+        const spanRes = await splitByTokenSpansWithAi(
+          chunkText,
+          grp.rows,
+          rule,
+          gemini,
+          {
+            isPartial: false,
+            suppressAutoEllipsis: opts?.suppressAutoEllipsis,
+          },
+        );
+        if (spanRes && spanRes.lines.length === grp.rows.length) {
+          grpLines = spanRes.lines;
+          if (spanRes.hasInversion) anyInversion = true;
+        }
+      } catch {
+        // fallback below
+      }
+
+      if (!grpLines) {
+        try {
+          const subSpec = grp.rows
+            .map((r, idx) => `(${idx + 1}) ZH: ${r.chinese} | EN: ${r.english}`)
+            .join("\n");
+          const subRes = await gemini.generateStructuredJson<{
+            lines?: string[];
+            hasInversion?: boolean;
+          }>(
+            {
+              systemInstruction: DIRECT_SPLIT_SYSTEM_PROMPT,
+              userPrompt:
+                `目标语种：${rule.langName}（分句锚点子块 ${gIdx + 1}/${groups.length}，共 ${grp.rows.length} 行）\n` +
+                `目标语子句原文：\n${chunkText}\n` +
+                `请严格按以下 ${grp.rows.length} 行 1:1 切分：\n${subSpec}`,
+              jsonSchema: REVIEW_SINGLE_SCHEMA,
+            },
+            { preferAlternateKey: true },
+          );
+          if (Array.isArray(subRes.lines) && subRes.lines.length === grp.rows.length) {
+            grpLines = projectLinesVerbatimResilient(chunkText, subRes.lines);
+            if (subRes.hasInversion) anyInversion = true;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!grpLines || grpLines.length !== grp.rows.length) {
+        allGroupsOk = false;
+        break;
+      }
+      assembled.push(...grpLines);
+    }
+
+    if (allGroupsOk && assembled.length === sourceRows.length) {
+      const projected = projectLinesVerbatimResilient(preparedSrc, assembled, {
+        isPartial: opts?.isPartial,
+      });
+      if (projected) {
+        return {
+          lines: auditAndRepairBilingualAlignment(
+            projected,
+            sourceRows,
+            rule,
+            Boolean(opts?.suppressAutoEllipsis),
+          ),
+          hasInversion: anyInversion,
+        };
+      }
     }
   }
 
@@ -1386,11 +1779,14 @@ export async function batchSplitTargetsWithAi(
               : tr.hasTruncation
                 ? ` | 备注: ${r.remark}`
                 : "";
+            const anchorNote = isCompleteSentenceAnchorRow(r)
+              ? " | 【句末硬锚点：目标语此行必须在对应完整句句末结束，严禁跨句提前或延后！】"
+              : "";
             const omitNote =
               i === req.sourceRows.length - 1 && hasExplicitRowOmission(r)
                 ? " | 【末行有省略号：在此句结束处停止，舍弃原文后续被省略句子】"
                 : "";
-            return `  (${i + 1}) ZH: ${r.chinese} | EN: ${r.english}${truncNote}${omitNote}`;
+            return `  (${i + 1}) ZH: ${r.chinese} | EN: ${r.english}${truncNote}${anchorNote}${omitNote}`;
           })
           .join("\n");
         const refEnLine = req.referenceEn ? `原段完整英文参考：\n${req.referenceEn}\n` : "";
@@ -1590,8 +1986,10 @@ export async function batchSplitTargetsWithAi(
                 analysis = recheck;
                 passedAlignment = true;
                 if (auditRes.hasInversion) hasInversion = true;
-                if (recheck.softReason && /问号|标点|句号|逗号/.test(recheck.softReason)) {
-                  softWarningReason = "仅标点差异，已通过 AI 语义核对，请人工顺便确认";
+                if (recheck.softReason) {
+                  softWarningReason = /问号|标点|句号|逗号/.test(recheck.softReason)
+                    ? "仅标点差异，已通过 AI 语义核对，请人工顺便确认"
+                    : `AI 语义重切后仍存长度偏差（${recheck.softReason}），请人工顺便核对`;
                 }
                 diagLog.info(
                   "AI 语义复核",
@@ -1612,6 +2010,61 @@ export async function batchSplitTargetsWithAi(
                 "AI 语义复核",
                 `[${rule.langName}] ${req.id} 经 AI 语义核对确认意思准确（${softWarningReason || "含语序倒装/句式差异"}，已放行）`,
               );
+            }
+
+            // Divide-and-conquer sentence-checkpoint rescue for multi-sentence blocks (>= 4 rows, >= 2 sentence anchors)
+            if (
+              !passedAlignment &&
+              req.sourceRows.length >= 4 &&
+              partitionRowsBySentenceCheckpoints(req.sourceRows).length >= 2
+            ) {
+              try {
+                diagLog.info(
+                  "AI 句末锚点分段抢救",
+                  `[${rule.langName}] ${req.id} 启动句末硬锚点分而治之抢救...`,
+                );
+                const cpRes = await splitBySentenceCheckpointsWithAi(
+                  preparedSrc,
+                  req.sourceRows,
+                  rule,
+                  gemini,
+                  {
+                    isPartial: isPartialOrOmit,
+                    suppressAutoEllipsis: req.suppressAutoEllipsis,
+                    referenceEn: req.referenceEn,
+                  },
+                );
+                if (cpRes) {
+                  const cpLines = auditAndRepairBilingualAlignment(
+                    cpRes.lines.map((l) => decodeThaiDoubleSpaces(l, rule)),
+                    req.sourceRows,
+                    rule,
+                    Boolean(req.suppressAutoEllipsis),
+                  );
+                  const cpCheck = analyzeBilingualAlignment(
+                    cpLines,
+                    req.sourceRows,
+                    preparedSrc,
+                    rule,
+                    alignOpts,
+                  );
+                  if (cpCheck.hardReason === null) {
+                    decoded = cpLines;
+                    analysis = cpCheck;
+                    passedAlignment = true;
+                    if (cpRes.hasInversion) hasInversion = true;
+                    if (cpCheck.softReason && /问号|标点|句号|逗号/.test(cpCheck.softReason)) {
+                      softWarningReason = "仅标点差异，已通过句末锚点对齐，请人工顺便确认";
+                    }
+                    diagLog.info(
+                      "AI 句末锚点分段抢救成功",
+                      `[${rule.langName}] ${req.id} 经句末硬锚点分段抢救通过双语核对`,
+                    );
+                  }
+                }
+              } catch {
+                // ignore checkpoint rescue error
+              }
             }
 
             // Last-chance rescue for genuine hard structural errors if token-span mode hasn't been tried yet
